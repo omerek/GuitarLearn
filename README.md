@@ -10,7 +10,7 @@ Klasik (ve akustik) gitar için sade bir Android uygulaması: sıfırdan başlay
 - **Akor kütüphanesi:** 18 akor; şema, parmak numaraları, ipucu ve sesli dinleme.
 - **Şarkılar:** akorlar ilgili hecenin üstünde; otomatik kaydırma, şarkı temposunda metronom, akora dokununca şema. Yalnızca anonim türküler, kamu malı şarkılar ve özgün etütler.
 - **Şarkıda takip modu:** Sıradaki akor ekranda ve gitardaki LED'lerde görünür. Mikrofon tele vuruşu dinler, doğru akoru duyunca sonraki akora geçer. Elle ya da gitardaki düğmelerle de geçilebilir.
-- **Gitar LED'leri (isteğe bağlı):** Perdelere takılan WS2812B LED'ler, USB-OTG ile bağlanan ESP32-S2 Mini üzerinden hangi perdede hangi tele basılacağını gösterir. Her telin kendi rengi vardır. Kablolama, güç ve kart yazılımı için [firmware/README.md](firmware/README.md) dosyasına bak.
+- **Gitar LED'leri (isteğe bağlı):** Perdelere takılan WS2812B LED'ler, USB-OTG ile bağlanan ESP32-S2 Mini ya da USB/Bluetooth ile bağlanan ESP32-S3 kartı üzerinden hangi perdede hangi tele basılacağını gösterir. Her telin kendi rengi vardır. Kablolama, güç ve kart yazılımı için [firmware/README.md](firmware/README.md) dosyasına bak.
 - **Metronom:** 40–220 BPM, 2/4–6/4, dokunarak tempo bulma.
 - İnternet, hesap ya da reklam yok.
 

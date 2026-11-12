@@ -17,6 +17,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.Bluetooth
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.draw.clip
+import com.omerek.guitarlearn.led.LedState
+import com.omerek.guitarlearn.led.LedTransport
+import com.omerek.guitarlearn.ui.platform.rememberBluetoothPermission
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -171,7 +179,7 @@ fun LedStatusChip(modifier: Modifier = Modifier, onDark: Boolean = false) {
         Icon(Icons.Rounded.Lightbulb, null, tint = dot, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(4.dp))
         Text(
-            if (connected) "LED bağlı" else "LED",
+            if (connected) (if (state.transport == LedTransport.BLE) "LED · BT" else "LED bağlı") else "LED",
             style = MaterialTheme.typography.labelMedium,
             color = if (onDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -188,15 +196,19 @@ fun LedSettingsDialog(onDismiss: () -> Unit) {
         confirmButton = { TextButton(onClick = onDismiss) { Text("Tamam") } },
         title = { Text("Gitar LED'leri") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Text(state.message, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 if (state.status != LedStatus.CONNECTED) {
                     Text(
-                        "ESP32-S2 Mini'yi OTG kablosuyla telefona tak. Android \"Gitar Öğren açılsın mı?\" diye sorarsa izin ver.",
+                        "Kablolu: kartı OTG kablosuyla telefona tak. Android \"Gitar Öğren açılsın mı?\" diye sorarsa izin ver.",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    FilledTonalButton(onClick = { LedController.connect() }) { Text("Bağlan") }
+                    FilledTonalButton(onClick = { LedController.connect() }) { Text("USB ile bağlan") }
                 }
+                BluetoothSection(state)
 
                 Text("Takılı perde sayısı", style = MaterialTheme.typography.labelLarge)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -255,5 +267,69 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** Kablosuz bağlantı: yalnızca ESP32-S3 kartında var (S2'de Bluetooth yok). */
+@Composable
+private fun BluetoothSection(state: LedState) {
+    if (!LedController.bluetoothAvailable) return
+    val permission = rememberBluetoothPermission()
+    val scanning by LedController.scanning.collectAsState()
+    val found by LedController.scanResults.collectAsState()
+    val saved = LedController.savedBleAddress
+    val onUsb = state.status == LedStatus.CONNECTED && state.transport == LedTransport.USB
+
+    Text("Bluetooth (ESP32-S3 kartı)", style = MaterialTheme.typography.labelLarge)
+    when {
+        onUsb -> Text("USB bağlıyken USB kullanılır. Kablosuz için kabloyu çıkar.", style = MaterialTheme.typography.bodySmall)
+        !permission.granted -> {
+            Text("Kartı bulmak için Bluetooth izni gerekiyor.", style = MaterialTheme.typography.bodySmall)
+            FilledTonalButton(onClick = { permission.request() }) { Text("İzin ver") }
+        }
+        !LedController.bluetoothOn -> Text("Telefonun Bluetooth'u kapalı. Açıp tekrar dene.", style = MaterialTheme.typography.bodySmall)
+        else -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalButton(onClick = { LedController.startScan() }, enabled = !scanning) {
+                    Icon(Icons.Rounded.Bluetooth, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (scanning) "Aranıyor…" else "Kartı ara")
+                }
+                if (scanning) {
+                    Spacer(Modifier.width(10.dp))
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                }
+            }
+            found.forEach { c ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { LedController.connectBle(c.address) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(c.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(c.address, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(if (c.address == saved) "kayıtlı" else "bağlan", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            if (!scanning && found.isEmpty() && saved == null) {
+                Text("Kartı aç, sonra \"Kartı ara\"ya bas.", style = MaterialTheme.typography.bodySmall)
+            }
+            if (saved != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Kayıtlı kart menzile girince kendiliğinden bağlanır.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { LedController.forgetBle() }) { Text("Unut") }
+                }
+            }
+        }
     }
 }

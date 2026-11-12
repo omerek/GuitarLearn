@@ -1,7 +1,9 @@
 /*
- * Gitar LED kartı — Wemos/Lolin ESP32-S2 Mini
+ * Gitar LED kartı — Wemos/Lolin ESP32-S2 Mini (USB) ya da ESP32-S3FH4R2 kartları (USB + Bluetooth)
  *
  * Telefon (Gitar Öğren uygulaması) USB-OTG ile bağlanır; kart USB seri port (CDC) olarak görünür.
+ * ESP32-S3'te ayrıca Bluetooth Low Energy (Nordic UART servisi, adı "GitarLED") ile kablosuz bağlanılır.
+ * Aynı kod iki kart için de derlenir; kart türü derleyici tarafından seçilir.
  * Uygulama hangi perdede hangi telin basılacağını gönderir, kart WS2812B LED'leri yakar.
  * Gitara takılı iki düğme uygulamaya "önceki / sonraki akor" bilgisini yollar.
  *
@@ -19,10 +21,75 @@
 #include <Adafruit_NeoPixel.h>
 
 // ---- Bağlantılar (README'deki şemaya bak) ----
+#if CONFIG_IDF_TARGET_ESP32S3
+#define HAS_BLE 1
+const int LED_PIN = 4;         // WS2812B DIN (330 ohm direnç üzerinden)
+const int BTN_PREV_PIN = 5;    // önceki akor düğmesi -> GND
+const int BTN_NEXT_PIN = 6;    // sonraki akor düğmesi -> GND
+const int BOARD_LED_PIN = -1;  // S3 kartlarının yerleşik LED'i farklı; kullanılmıyor
+#else
+#define HAS_BLE 0
 const int LED_PIN = 16;        // WS2812B DIN (330 ohm direnç üzerinden)
 const int BTN_PREV_PIN = 11;   // önceki akor düğmesi -> GND
 const int BTN_NEXT_PIN = 12;   // sonraki akor düğmesi -> GND
 const int BOARD_LED_PIN = 15;  // kart üzerindeki mavi LED
+#endif
+
+#if HAS_BLE
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
+#include <freertos/queue.h>
+
+#define BLE_NAME "GitarLED"
+#define UART_SERVICE "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+#define UART_RX "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  // telefon -> kart
+#define UART_TX "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  // kart -> telefon
+
+BLECharacteristic *bleTx = nullptr;
+volatile bool bleConnected = false;
+volatile bool bleJustDisconnected = false;
+QueueHandle_t bleQueue;  // Bluetooth'tan gelen baytlar (BLE görevi -> loop)
+
+class ServerEvents : public BLEServerCallbacks {
+  void onConnect(BLEServer *) override { bleConnected = true; }
+  void onDisconnect(BLEServer *) override {
+    bleConnected = false;
+    bleJustDisconnected = true;
+  }
+};
+
+class RxEvents : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    auto v = c->getValue();
+    for (size_t i = 0; i < v.length(); i++) {
+      char ch = v[i];
+      xQueueSend(bleQueue, &ch, 0);
+    }
+  }
+};
+
+void setupBle() {
+  bleQueue = xQueueCreate(2048, 1);
+  BLEDevice::init(BLE_NAME);
+  BLEDevice::setMTU(185);
+  BLEServer *server = BLEDevice::createServer();
+  server->setCallbacks(new ServerEvents());
+  BLEService *service = server->createService(UART_SERVICE);
+  bleTx = service->createCharacteristic(UART_TX, BLECharacteristic::PROPERTY_NOTIFY);
+  bleTx->addDescriptor(new BLE2902());
+  BLECharacteristic *rx = service->createCharacteristic(
+      UART_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  rx->setCallbacks(new RxEvents());
+  service->start();
+  BLEAdvertising *adv = BLEDevice::getAdvertising();
+  adv->addServiceUUID(UART_SERVICE);
+  adv->setScanResponse(true);
+  BLEDevice::startAdvertising();
+}
+#else
+const bool bleConnected = false;
+#endif
 
 const int MAX_LEDS = 150;
 const int MAX_COLORS = 6;
@@ -53,6 +120,18 @@ Button buttons[2] = {{BTN_PREV_PIN, "K P", false, 0}, {BTN_NEXT_PIN, "K N", fals
 
 // ---------------------------------------------------------------------------
 // Yardımcılar
+
+// Telefona bir satır gönderir (bağlı olan her yoldan)
+void sendLine(const char *text) {
+  if (Serial) Serial.println(text);
+#if HAS_BLE
+  if (bleConnected && bleTx) {
+    String s = String(text) + "\n";
+    bleTx->setValue((uint8_t *)s.c_str(), s.length());
+    bleTx->notify();
+  }
+#endif
+}
 
 uint32_t scaleColor(uint32_t c, float k) {
   uint8_t r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
@@ -185,9 +264,12 @@ void handleLine(String s) {
   if (s.length() == 0) return;
   char cmd = s[0];
   switch (cmd) {
-    case '?':
-      Serial.printf("GITARLED 1 %d\n", numLeds);
+    case '?': {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "GITARLED 1 %d", numLeds);
+      sendLine(buf);
       break;
+    }
     case 'N': {
       int n = s.substring(1).toInt();
       if (n >= 1 && n <= MAX_LEDS) {
@@ -216,16 +298,28 @@ void handleLine(String s) {
   }
 }
 
-void readSerial() {
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c == '\n') {
-      handleLine(line);
-      line = "";
-    } else if (line.length() < 2000) {
-      line += c;
-    }
+void feedChar(String &buf, char c) {
+  if (c == '\n') {
+    handleLine(buf);
+    buf = "";
+  } else if (buf.length() < 2000) {
+    buf += c;
   }
+}
+
+void readInputs() {
+  while (Serial.available()) feedChar(line, Serial.read());
+#if HAS_BLE
+  static String bleLine;
+  char c;
+  while (xQueueReceive(bleQueue, &c, 0) == pdTRUE) feedChar(bleLine, c);
+  if (bleJustDisconnected) {
+    bleJustDisconnected = false;
+    bleLine = "";
+    delay(200);
+    BLEDevice::startAdvertising();  // yeniden bağlanılabilsin
+  }
+#endif
 }
 
 void readButtons() {
@@ -235,12 +329,8 @@ void readButtons() {
     if (down != b.pressed && now - b.changedAt > 30) {  // 30 ms parazit süzgeci
       b.pressed = down;
       b.changedAt = now;
-      if (down) {
-        Serial.println(b.msg);
-        digitalWrite(BOARD_LED_PIN, HIGH);
-      } else {
-        digitalWrite(BOARD_LED_PIN, LOW);
-      }
+      if (down) sendLine(b.msg);
+      if (BOARD_LED_PIN >= 0) digitalWrite(BOARD_LED_PIN, down ? HIGH : LOW);
     }
   }
 }
@@ -250,7 +340,7 @@ void readButtons() {
 void setup() {
   pinMode(BTN_PREV_PIN, INPUT_PULLUP);
   pinMode(BTN_NEXT_PIN, INPUT_PULLUP);
-  pinMode(BOARD_LED_PIN, OUTPUT);
+  if (BOARD_LED_PIN >= 0) pinMode(BOARD_LED_PIN, OUTPUT);
   Serial.begin(115200);
   strip.begin();
   strip.setBrightness(brightness);
@@ -258,13 +348,17 @@ void setup() {
   strip.show();
   clearFrame();
   bootAnimation();
+#if HAS_BLE
+  setupBle();
+#endif
 }
 
 void loop() {
-  readSerial();
+  readInputs();
   readButtons();
 
-  bool connected = (bool)Serial;  // uygulama portu açınca (DTR) true olur
+  // USB'de uygulama portu açınca (DTR) ya da Bluetooth bağlanınca true olur
+  bool connected = (bool)Serial || bleConnected;
   if (!connected) {
     if (wasConnected) clearFrame();
     wasConnected = false;

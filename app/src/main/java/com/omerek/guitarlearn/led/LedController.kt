@@ -1,18 +1,26 @@
 package com.omerek.guitarlearn.led
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.PendingIntent
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
-import android.hardware.usb.UsbConstants
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbDeviceConnection
-import android.hardware.usb.UsbEndpoint
-import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
 import com.omerek.guitarlearn.data.Chord
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -21,19 +29,26 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.Executors
-import kotlin.concurrent.thread
 
 /**
- * Telefona USB-OTG ile takılan ESP32-S2 Mini'yi (USB CDC seri port) bulur, bağlanır ve LED komutlarını gönderir.
- * Harici kütüphane kullanmaz: Android'in USB Host API'siyle basit bir CDC-ACM sürücüsüdür.
+ * Gitar LED kartını yönetir:
+ *  - USB-OTG ile takılı kart (ESP32-S2 Mini ya da ESP32-S3) varsa USB'den konuşur (önceliklidir).
+ *  - Yoksa Bluetooth (BLE) ile ESP32-S3 kartına bağlanır; son bağlanılan kart hatırlanır ve menzile girince bağlanılır.
+ * Harici kütüphane kullanılmaz.
  */
+@SuppressLint("MissingPermission") // Bluetooth çağrılarından önce hasBlePermission() denetlenir
 object LedController {
     private const val ACTION_PERMISSION = "com.omerek.guitarlearn.USB_PERMISSION"
     private const val ESPRESSIF_VID = 0x303A
+    private const val SCAN_MS = 10_000L
 
     private lateinit var app: Context
     private lateinit var prefs: SharedPreferences
     private val usb: UsbManager by lazy { app.getSystemService(Context.USB_SERVICE) as UsbManager }
+    private val bluetooth: BluetoothAdapter? by lazy {
+        (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+    }
+    private val main = Handler(Looper.getMainLooper())
 
     private val _state = MutableStateFlow(LedState())
     val state: StateFlow<LedState> = _state.asStateFlow()
@@ -46,14 +61,27 @@ object LedController {
     private val _config = MutableStateFlow(LedConfig())
     val config: StateFlow<LedConfig> = _config.asStateFlow()
 
-    private val writer = Executors.newSingleThreadExecutor { r -> Thread(r, "led-usb").apply { isDaemon = true } }
-    @Volatile private var port: CdcPort? = null
+    private val _scanResults = MutableStateFlow<List<BleCandidate>>(emptyList())
+
+    /** Bluetooth taramasında bulunan kartlar. */
+    val scanResults: StateFlow<List<BleCandidate>> = _scanResults.asStateFlow()
+
+    private val _scanning = MutableStateFlow(false)
+    val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    private val writer = Executors.newSingleThreadExecutor { r -> Thread(r, "led-link").apply { isDaemon = true } }
+    @Volatile private var link: LedLink? = null
+    @Volatile private var usbDeviceId: Int? = null
     @Volatile private var connecting = false
+    @Volatile private var pendingBle: BleLink? = null
     private var current: List<FretNote> = emptyList()
 
     /** LED'lerde şu an gösterilen akor (geçici bir pencere kapanınca geri yüklemek için). */
     var currentChord: Chord? = null
         private set
+
+    /** Hatırlanan Bluetooth kartının adresi (yoksa null). */
+    val savedBleAddress: String? get() = if (::prefs.isInitialized) prefs.getString("bleAddress", null) else null
 
     fun init(context: Context) {
         if (::app.isInitialized) return
@@ -80,11 +108,14 @@ object LedController {
             when (intent.action) {
                 ACTION_PERMISSION -> {
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) connect()
-                    else _state.value = LedState(LedStatus.NEEDS_PERMISSION, "USB izni verilmedi")
+                    else setState(LedState(LedStatus.NEEDS_PERMISSION, "USB izni verilmedi"))
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     val dev = deviceExtra(intent)
-                    if (dev == null || dev.deviceId == port?.device?.deviceId) disconnect("Kart çıkarıldı")
+                    if (usbDeviceId != null && (dev == null || dev.deviceId == usbDeviceId)) {
+                        dropLink("Kart çıkarıldı")
+                        connectSavedBle() // kablosuz kart varsa ona geç
+                    }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> connect()
             }
@@ -96,55 +127,184 @@ object LedController {
         if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
         else intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
 
-    /** Takılı kartı bulur; izin yoksa ister, varsa bağlanır. Uygulama USB takılınca açıldığında da çağrılır. */
+    private fun setState(s: LedState) { _state.value = s }
+
+    // ---------------------------------------------------------------- USB
+
+    /**
+     * Önce takılı USB kartını dener; yoksa hatırlanan Bluetooth kartına bağlanır.
+     * Uygulama açılınca ve USB takılınca çağrılır.
+     */
     fun connect() {
-        if (!::app.isInitialized || port != null || connecting) return
-        val device = findDevice()
+        if (!::app.isInitialized || connecting) return
+        if (link != null && _state.value.transport == LedTransport.USB) return
+        val device = findUsbDevice()
         if (device == null) {
-            _state.value = LedState(LedStatus.NO_DEVICE, "Kart bağlı değil")
+            if (link == null) connectSavedBle()
             return
         }
         if (!usb.hasPermission(device)) {
-            _state.value = LedState(LedStatus.NEEDS_PERMISSION, "USB izni bekleniyor")
+            setState(LedState(LedStatus.NEEDS_PERMISSION, "USB izni bekleniyor"))
             val flags = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
             val pi = PendingIntent.getBroadcast(app, 0, Intent(ACTION_PERMISSION).setPackage(app.packageName), flags)
             usb.requestPermission(device, pi)
             return
         }
+        // USB öncelikli: Bluetooth bağlıysa bırak
+        if (link != null) dropLink("USB'ye geçiliyor")
         connecting = true
         writer.execute {
             val p = try { CdcPort.open(usb, device) } catch (e: Exception) { null }
             connecting = false
             if (p == null) {
-                _state.value = LedState(LedStatus.ERROR, "Karta bağlanılamadı")
+                setState(LedState(LedStatus.ERROR, "Karta bağlanılamadı"))
                 return@execute
             }
-            port = p
-            _state.value = LedState(LedStatus.CONNECTED, "Kart bağlandı")
-            p.startReading { line ->
-                LedProtocol.parseButton(line)?.let { _buttons.tryEmit(it) }
-                if (LedProtocol.parseHello(line) != null) {
-                    _state.value = _state.value.copy(firmwareOk = true, message = "LED kartı hazır")
-                }
-            }
-            sendNow(LedProtocol.hello())
-            sendSetup()
-            sendNow(LedProtocol.connectedAnimation())
-            sendNow(LedProtocol.frame(LedLayout.pixels(current, _config.value)))
+            usbDeviceId = device.deviceId
+            attach(p, LedTransport.USB)
         }
     }
 
-    private fun findDevice(): UsbDevice? {
+    private fun findUsbDevice(): UsbDevice? {
         val all = usb.deviceList.values
         return all.firstOrNull { it.vendorId == ESPRESSIF_VID && CdcPort.hasCdc(it) }
             ?: all.firstOrNull { CdcPort.hasCdc(it) }
     }
 
-    private fun disconnect(message: String) {
-        val p = port
-        port = null
-        writer.execute { p?.close() }
-        _state.value = LedState(LedStatus.NO_DEVICE, message)
+    // ---------------------------------------------------------------- Bluetooth
+
+    /** Android sürümüne göre gereken Bluetooth izinleri. */
+    fun blePermissions(): Array<String> =
+        if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+
+    fun hasBlePermission(): Boolean = ::app.isInitialized && blePermissions().all {
+        ContextCompat.checkSelfPermission(app, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    val bluetoothAvailable: Boolean get() = ::app.isInitialized && bluetooth != null
+    val bluetoothOn: Boolean get() = bluetooth?.isEnabled == true
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val c = BleCandidate(
+                name = result.scanRecord?.deviceName ?: result.device.name ?: "Gitar LED",
+                address = result.device.address,
+                rssi = result.rssi,
+            )
+            _scanResults.value = (_scanResults.value.filter { it.address != c.address } + c).sortedByDescending { it.rssi }
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            _scanning.value = false
+            setState(_state.value.copy(message = "Bluetooth taraması başlatılamadı ($errorCode)"))
+        }
+    }
+
+    /** Yakındaki LED kartlarını 10 saniye boyunca arar. */
+    fun startScan() {
+        val adapter = bluetooth ?: return
+        if (!hasBlePermission() || !adapter.isEnabled || _scanning.value) return
+        val scanner = adapter.bluetoothLeScanner ?: return
+        _scanResults.value = emptyList()
+        _scanning.value = true
+        val filters = listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(BleLink.SERVICE)).build())
+        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        runCatching { scanner.startScan(filters, settings, scanCallback) }.onFailure { _scanning.value = false }
+        main.postDelayed({ stopScan() }, SCAN_MS)
+    }
+
+    fun stopScan() {
+        if (!_scanning.value) return
+        _scanning.value = false
+        runCatching { bluetooth?.bluetoothLeScanner?.stopScan(scanCallback) }
+    }
+
+    /** Taramada seçilen karta bağlanır ve onu hatırlar. */
+    fun connectBle(address: String) {
+        stopScan()
+        prefs.edit().putString("bleAddress", address).apply()
+        if (_state.value.transport == LedTransport.USB && link != null) {
+            setState(_state.value.copy(message = "USB bağlıyken USB kullanılır. Kablosuz için kabloyu çıkar."))
+            return
+        }
+        dropLink("Bağlanıyor…")
+        startBle(address, autoConnect = false)
+    }
+
+    /** Hatırlanan Bluetooth kartını unutur ve bağlantıyı keser. */
+    fun forgetBle() {
+        prefs.edit().remove("bleAddress").apply()
+        pendingBle?.close(); pendingBle = null
+        if (_state.value.transport == LedTransport.BLE) dropLink("Bluetooth kartı unutuldu")
+    }
+
+    private fun connectSavedBle() {
+        val address = savedBleAddress ?: run {
+            if (link == null) setState(LedState(LedStatus.NO_DEVICE, "Kart bağlı değil"))
+            return
+        }
+        if (pendingBle != null || link != null) return
+        if (!hasBlePermission() || !bluetoothOn) {
+            setState(LedState(LedStatus.NO_DEVICE, "Bluetooth kartı için Bluetooth'u aç"))
+            return
+        }
+        startBle(address, autoConnect = true)
+    }
+
+    private fun startBle(address: String, autoConnect: Boolean) {
+        val adapter = bluetooth ?: return
+        if (!hasBlePermission() || !adapter.isEnabled) {
+            setState(LedState(LedStatus.NEEDS_PERMISSION, "Bluetooth izni ya da Bluetooth kapalı"))
+            return
+        }
+        val device = runCatching { adapter.getRemoteDevice(address) }.getOrNull() ?: return
+        pendingBle?.close()
+        setState(LedState(LedStatus.NO_DEVICE, if (autoConnect) "Bluetooth kartı bekleniyor…" else "Bluetooth ile bağlanıyor…"))
+        pendingBle = BleLink.connect(
+            app, device, autoConnect,
+            onReady = { l ->
+                if (pendingBle === l) pendingBle = null
+                writer.execute { attach(l, LedTransport.BLE) }
+            },
+            onLost = { l ->
+                if (pendingBle === l) pendingBle = null
+                if (link === l) {
+                    dropLink("Bluetooth bağlantısı koptu")
+                    // Menzile geri girince kendiliğinden bağlansın
+                    main.postDelayed({ connectSavedBle() }, 1500)
+                } else if (link == null) {
+                    setState(LedState(LedStatus.ERROR, "Bluetooth kartına bağlanılamadı"))
+                }
+            },
+        )
+    }
+
+    // ---------------------------------------------------------------- Ortak
+
+    /** Yazıcı iş parçacığında çağrılır: bağlantıyı devralır ve kartı kurar. */
+    private fun attach(l: LedLink, transport: LedTransport) {
+        if (link != null && link !== l) runCatching { link?.close() }
+        link = l
+        setState(LedState(LedStatus.CONNECTED, "Kart bağlandı (${transport.title})", transport = transport))
+        l.startReading { line ->
+            LedProtocol.parseButton(line)?.let { _buttons.tryEmit(it) }
+            if (LedProtocol.parseHello(line) != null) {
+                _state.value = _state.value.copy(firmwareOk = true, message = "LED kartı hazır (${transport.title})")
+            }
+        }
+        sendNow(LedProtocol.hello())
+        sendSetup()
+        sendNow(LedProtocol.connectedAnimation())
+        sendNow(LedProtocol.frame(LedLayout.pixels(current, _config.value)))
+    }
+
+    private fun dropLink(message: String) {
+        val l = link
+        link = null
+        usbDeviceId = null
+        if (l != null) writer.execute { l.close() }
+        setState(LedState(LedStatus.NO_DEVICE, message))
     }
 
     /** Ekranda gösterilen akoru LED'lere de yansıtır. null = söndür. */
@@ -168,6 +328,7 @@ object LedController {
             .putBoolean("firstStringFirst", c.firstStringFirst)
             .putBoolean("zigzag", c.zigzag)
             .apply()
+        if (link == null) return
         writer.execute {
             sendSetup()
             sendNow(LedProtocol.frame(LedLayout.pixels(current, c)))
@@ -181,87 +342,16 @@ object LedController {
     }
 
     private fun send(text: String) {
-        if (port == null) return
+        if (link == null) return
         writer.execute { sendNow(text) }
     }
 
     private fun sendNow(text: String) {
-        val p = port ?: return
-        if (!p.write(text.toByteArray(Charsets.US_ASCII))) disconnect("Kartla bağlantı koptu")
-    }
-}
-
-/** En küçük CDC-ACM (USB seri port) sürücüsü: veri arayüzündeki bulk uçlarla yazar/okur. */
-private class CdcPort(
-    val device: UsbDevice,
-    private val conn: UsbDeviceConnection,
-    private val interfaces: List<UsbInterface>,
-    private val out: UsbEndpoint,
-    private val input: UsbEndpoint?,
-) {
-    @Volatile private var open = true
-
-    fun write(data: ByteArray): Boolean {
-        var offset = 0
-        while (offset < data.size) {
-            val n = minOf(out.maxPacketSize, data.size - offset)
-            val chunk = data.copyOfRange(offset, offset + n)
-            val sent = conn.bulkTransfer(out, chunk, n, 500)
-            if (sent < 0) return false
-            offset += sent
-        }
-        return true
-    }
-
-    fun startReading(onLine: (String) -> Unit) {
-        val ep = input ?: return
-        thread(name = "led-usb-read", isDaemon = true) {
-            val buf = ByteArray(ep.maxPacketSize.coerceAtLeast(64))
-            val line = StringBuilder()
-            while (open) {
-                val n = try { conn.bulkTransfer(ep, buf, buf.size, 300) } catch (e: Exception) { -1 }
-                if (n <= 0) continue
-                for (i in 0 until n) {
-                    val ch = buf[i].toInt().toChar()
-                    if (ch == '\n') { onLine(line.toString()); line.clear() }
-                    else if (line.length < 200) line.append(ch)
-                }
-            }
-        }
-    }
-
-    fun close() {
-        open = false
-        interfaces.forEach { runCatching { conn.releaseInterface(it) } }
-        runCatching { conn.close() }
-    }
-
-    companion object {
-        fun hasCdc(d: UsbDevice): Boolean =
-            (0 until d.interfaceCount).any { d.getInterface(it).interfaceClass == UsbConstants.USB_CLASS_CDC_DATA }
-
-        fun open(usb: UsbManager, device: UsbDevice): CdcPort? {
-            val all = (0 until device.interfaceCount).map { device.getInterface(it) }
-            val data = all.firstOrNull { it.interfaceClass == UsbConstants.USB_CLASS_CDC_DATA } ?: return null
-            val control = all.firstOrNull { it.interfaceClass == UsbConstants.USB_CLASS_COMM }
-            var out: UsbEndpoint? = null
-            var input: UsbEndpoint? = null
-            for (i in 0 until data.endpointCount) {
-                val ep = data.getEndpoint(i)
-                if (ep.type != UsbConstants.USB_ENDPOINT_XFER_BULK) continue
-                if (ep.direction == UsbConstants.USB_DIR_OUT) out = ep else input = ep
-            }
-            if (out == null) return null
-            val conn = usb.openDevice(device) ?: return null
-            val claimed = listOfNotNull(control, data).filter { conn.claimInterface(it, true) }
-            if (data !in claimed) { conn.close(); return null }
-            control?.let {
-                // 115200 8N1 (1200 baud kullanılmaz: ESP32'yi yükleme moduna sokar) ve DTR+RTS açık
-                val lineCoding = byteArrayOf(0x00, 0xC2.toByte(), 0x01, 0x00, 0, 0, 8)
-                conn.controlTransfer(0x21, 0x20, 0, it.id, lineCoding, lineCoding.size, 500)
-                conn.controlTransfer(0x21, 0x22, 0x03, it.id, null, 0, 500)
-            }
-            return CdcPort(device, conn, claimed, out, input)
+        val l = link ?: return
+        if (!l.write(text.toByteArray(Charsets.US_ASCII)) && link === l) {
+            val wasBle = _state.value.transport == LedTransport.BLE
+            dropLink("Kartla bağlantı koptu")
+            if (wasBle) main.postDelayed({ connectSavedBle() }, 1500)
         }
     }
 }

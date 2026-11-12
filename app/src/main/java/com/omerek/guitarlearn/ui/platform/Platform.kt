@@ -23,7 +23,7 @@ fun KeepScreenOn() {
     }
 }
 
-/** Mikrofon izni: granted şu anki durum, request() izni sorar. */
+/** Çalışma anı izni (mikrofon, Bluetooth): granted şu anki durum, request() izni sorar. */
 class MicPermission(private val state: State<Boolean>, private val ask: () -> Unit) {
     val granted: Boolean get() = state.value
     fun request() = ask()
@@ -37,4 +37,18 @@ fun rememberMicPermission(): MicPermission {
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted.value = it }
     return remember(launcher) { MicPermission(granted) { launcher.launch(Manifest.permission.RECORD_AUDIO) } }
+}
+
+/** Gitar LED kartı için Bluetooth izinleri (Android sürümüne göre tarama/bağlanma ya da konum). */
+@Composable
+fun rememberBluetoothPermission(): MicPermission {
+    val context = LocalContext.current
+    val perms = com.omerek.guitarlearn.led.LedController.blePermissions()
+    fun check() = perms.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    val granted = remember { mutableStateOf(check()) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        granted.value = check()
+        if (granted.value) com.omerek.guitarlearn.led.LedController.connect()
+    }
+    return remember(launcher) { MicPermission(granted) { launcher.launch(perms) } }
 }

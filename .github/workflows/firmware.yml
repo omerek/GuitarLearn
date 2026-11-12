@@ -18,10 +18,10 @@ jobs:
           python-version: '3.11'
       - name: PlatformIO kur
         run: pip install platformio
-      - name: Derle (ESP32-S2 Mini)
+      - name: Derle (ESP32-S2 Mini ve ESP32-S3)
         run: pio run -d firmware/GitarLed
-      - name: Derlenmiş dosyayı yükle
+      - name: Derlenmiş dosyaları yükle
         uses: actions/upload-artifact@v4
         with:
           name: GitarLed-firmware
-          path: firmware/GitarLed/.pio/build/lolin_s2_mini/firmware.bin
+          path: firmware/GitarLed/.pio/build/*/firmware.bin

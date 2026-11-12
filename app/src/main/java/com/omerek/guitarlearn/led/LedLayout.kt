@@ -56,12 +56,19 @@ data class LedConfig(
 /** USB bağlantı durumu. */
 enum class LedStatus { NO_DEVICE, NEEDS_PERMISSION, CONNECTED, ERROR }
 
+/** Kartla nasıl konuşuluyor. */
+enum class LedTransport(val title: String) { USB("USB"), BLE("Bluetooth") }
+
 data class LedState(
     val status: LedStatus = LedStatus.NO_DEVICE,
     val message: String = "Kart bağlı değil",
     /** Kartın bildirdiği yazılım cevabı geldiyse true. */
     val firmwareOk: Boolean = false,
+    val transport: LedTransport? = null,
 )
+
+/** Bluetooth taramasında bulunan bir LED kartı. */
+data class BleCandidate(val name: String, val address: String, val rssi: Int)
 
 /** Bir LED ve göstereceği renkler (birden fazlaysa kart sırayla döndürür). */
 data class LedPixel(val index: Int, val colors: List<Int>)
