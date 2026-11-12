@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import com.omerek.guitarlearn.audio.Metronome
 import com.omerek.guitarlearn.data.Progress
 import com.omerek.guitarlearn.led.LedController
+import com.omerek.guitarlearn.data.UserSongStore
 import com.omerek.guitarlearn.ui.GuitarApp
 import com.omerek.guitarlearn.ui.theme.GuitarTheme
 
@@ -21,9 +22,10 @@ class MainActivity : ComponentActivity() {
         val progress = Progress(applicationContext)
         // Gitar LED kartı: takılıysa bağlan (USB takılınca uygulama bu yolla da açılır)
         LedController.init(applicationContext)
+        val userSongs = UserSongStore(applicationContext)
         setContent {
             GuitarTheme {
-                GuitarApp(progress)
+                GuitarApp(progress, userSongs)
             }
         }
     }

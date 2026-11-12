@@ -71,6 +71,7 @@ fun ScreenHeader(
     icon: ImageVector? = null,
     onBack: (() -> Unit)? = null,
     eyebrow: String? = null,
+    actions: (@Composable () -> Unit)? = null,
     content: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     Column(
@@ -81,9 +82,15 @@ fun ScreenHeader(
             .statusBarsPadding()
             .padding(start = 20.dp, end = 20.dp, top = if (onBack != null) 4.dp else 18.dp, bottom = 20.dp),
     ) {
-        if (onBack != null) {
-            IconButton(onClick = onBack, modifier = Modifier.padding(start = 0.dp).size(40.dp)) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Geri", tint = Color.White)
+        if (onBack != null || actions != null) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (onBack != null) {
+                    IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Geri", tint = Color.White)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                actions?.invoke()
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {

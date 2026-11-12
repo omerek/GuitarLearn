@@ -28,7 +28,7 @@ data class Chord(
 
 enum class ChordLevel(val title: String) {
     BASIC("Temel akorlar"),
-    SEVENTH("7'li ve renkli akorlar"),
+    SEVENTH("7'li, sus ve renkli akorlar"),
     BARRE("Barre akorlar"),
 }
 
@@ -68,13 +68,60 @@ object Chords {
             tip = "Tek parmakla çalınan yumuşak bir akor."),
         Chord("Fmaj7", "Fa majör yedili", listOf(X, X, 3, 2, 1, 0), listOf(0, 0, 3, 2, 1, 0), ChordLevel.SEVENTH,
             tip = "F akorunun kolay hali. Barre öğrenene kadar F yerine kullan."),
+        Chord("Dm7", "Re minör yedili", listOf(X, X, 0, 2, 1, 1), listOf(0, 0, 0, 2, 1, 1), ChordLevel.SEVENTH,
+            tip = "İşaret parmağı 1. perdede iki teli birden basar."),
+        Chord("Cmaj7", "Do majör yedili", listOf(X, 3, 2, 0, 0, 0), listOf(0, 3, 2, 0, 0, 0), ChordLevel.SEVENTH,
+            tip = "C akorundan işaret parmağını kaldır; yumuşak, caz tınılı bir ses."),
+        Chord("Dmaj7", "Re majör yedili", listOf(X, X, 0, 2, 2, 2), listOf(0, 0, 0, 1, 2, 3), ChordLevel.SEVENTH),
+        Chord("Amaj7", "La majör yedili", listOf(X, 0, 2, 1, 2, 0), listOf(0, 0, 2, 1, 3, 0), ChordLevel.SEVENTH),
+        Chord("Gmaj7", "Sol majör yedili", listOf(3, 2, 0, 0, 0, 2), listOf(3, 2, 0, 0, 0, 1), ChordLevel.SEVENTH),
+        Chord("Asus2", "La sus2", listOf(X, 0, 2, 2, 0, 0), listOf(0, 0, 1, 2, 0, 0), ChordLevel.SEVENTH),
+        Chord("Asus4", "La sus4", listOf(X, 0, 2, 2, 3, 0), listOf(0, 0, 1, 2, 3, 0), ChordLevel.SEVENTH),
+        Chord("Dsus2", "Re sus2", listOf(X, X, 0, 2, 3, 0), listOf(0, 0, 0, 1, 3, 0), ChordLevel.SEVENTH),
+        Chord("Dsus4", "Re sus4", listOf(X, X, 0, 2, 3, 3), listOf(0, 0, 0, 1, 3, 4), ChordLevel.SEVENTH),
+        Chord("Esus4", "Mi sus4", listOf(0, 2, 2, 2, 0, 0), listOf(0, 2, 3, 4, 0, 0), ChordLevel.SEVENTH),
+        Chord("Cadd9", "Do add9", listOf(X, 3, 2, 0, 3, 0), listOf(0, 2, 1, 0, 3, 0), ChordLevel.SEVENTH),
+        Chord("D/F#", "Re / Fa# bas", listOf(2, 0, 0, 2, 3, 2), listOf(1, 0, 0, 2, 4, 3), ChordLevel.SEVENTH,
+            tip = "Bas notası Fa# olan D. Başparmakla 6. teli basan da olur."),
+        Chord("G/B", "Sol / Si bas", listOf(X, 2, 0, 0, 0, 3), listOf(0, 1, 0, 0, 0, 3), ChordLevel.SEVENTH),
+        Chord("C/G", "Do / Sol bas", listOf(3, 3, 2, 0, 1, 0), listOf(3, 4, 2, 0, 1, 0), ChordLevel.SEVENTH),
+        Chord("Eb", "Mi bemol majör", listOf(X, X, 1, 3, 4, 3), listOf(0, 0, 1, 2, 4, 3), ChordLevel.SEVENTH),
         Chord("F", "Fa majör", listOf(1, 3, 3, 2, 1, 1), listOf(1, 3, 4, 2, 1, 1), ChordLevel.BARRE, barreFret = 1,
             tip = "İşaret parmağı 1. perdede tüm telleri basar. Başta zorlar; sabırla çalış."),
         Chord("Bm", "Si minör", listOf(X, 2, 4, 4, 3, 2), listOf(0, 1, 3, 4, 2, 1), ChordLevel.BARRE, barreFret = 2,
             tip = "2. perdede barre, Am şeklini 2 perde yukarı taşı gibi düşün. 6. teli çalma."),
+        Chord("Fm", "Fa minör", listOf(1, 3, 3, 1, 1, 1), listOf(1, 3, 4, 1, 1, 1), ChordLevel.BARRE, barreFret = 1),
+        Chord("Bb", "Si bemol majör", listOf(X, 1, 3, 3, 3, 1), listOf(0, 1, 2, 3, 4, 1), ChordLevel.BARRE, barreFret = 1),
+        Chord("B", "Si majör", listOf(X, 2, 4, 4, 4, 2), listOf(0, 1, 2, 3, 4, 1), ChordLevel.BARRE, barreFret = 2),
+        Chord("F#", "Fa diyez majör", listOf(2, 4, 4, 3, 2, 2), listOf(1, 3, 4, 2, 1, 1), ChordLevel.BARRE, barreFret = 2),
+        Chord("F#m", "Fa diyez minör", listOf(2, 4, 4, 2, 2, 2), listOf(1, 3, 4, 1, 1, 1), ChordLevel.BARRE, barreFret = 2,
+            tip = "Em şeklinin 2. perdeye barre ile taşınmış hali."),
+        Chord("Gm", "Sol minör", listOf(3, 5, 5, 3, 3, 3), listOf(1, 3, 4, 1, 1, 1), ChordLevel.BARRE, barreFret = 3),
+        Chord("Cm", "Do minör", listOf(X, 3, 5, 5, 4, 3), listOf(0, 1, 3, 4, 2, 1), ChordLevel.BARRE, barreFret = 3),
+        Chord("C#m", "Do diyez minör", listOf(X, 4, 6, 6, 5, 4), listOf(0, 1, 3, 4, 2, 1), ChordLevel.BARRE, barreFret = 4),
+        Chord("C#", "Do diyez majör", listOf(X, 4, 6, 6, 6, 4), listOf(0, 1, 2, 3, 4, 1), ChordLevel.BARRE, barreFret = 4),
+        Chord("G#m", "Sol diyez minör", listOf(4, 6, 6, 4, 4, 4), listOf(1, 3, 4, 1, 1, 1), ChordLevel.BARRE, barreFret = 4),
+        Chord("Ab", "La bemol majör", listOf(4, 6, 6, 5, 4, 4), listOf(1, 3, 4, 2, 1, 1), ChordLevel.BARRE, barreFret = 4),
     )
 
     private val byName = all.associateBy { it.name }
 
-    fun get(name: String): Chord? = byName[name]
+    private val enharmonic = mapOf(
+        "Db" to "C#", "C#" to "Db", "D#" to "Eb", "Eb" to "D#", "Gb" to "F#", "F#" to "Gb",
+        "G#" to "Ab", "Ab" to "G#", "A#" to "Bb", "Bb" to "A#",
+    )
+
+    /**
+     * Akoru adına göre bulur. Yazım düzeltilir ("am" → Am), eş sesli adlar denenir (A# = Bb),
+     * "D/F#" gibi bas notalı akor kütüphanede yoksa ana akor (D) döner.
+     */
+    fun get(name: String): Chord? {
+        val n = ChordName.normalize(name) ?: name.trim()
+        byName[n]?.let { return it }
+        val m = Regex("^([A-G][#b]?)(.*)$").find(n) ?: return null
+        val (root, rest) = m.destructured
+        enharmonic[root]?.let { alt -> byName[alt + rest]?.let { return it } }
+        if ("/" in n) return get(n.substringBefore('/'))
+        return null
+    }
 }

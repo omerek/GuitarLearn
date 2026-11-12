@@ -26,6 +26,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omerek.guitarlearn.data.Progress
+import com.omerek.guitarlearn.data.Songs
+import com.omerek.guitarlearn.data.UserSong
+import com.omerek.guitarlearn.data.UserSongStore
+import com.omerek.guitarlearn.ui.platform.rememberBackupActions
+import com.omerek.guitarlearn.ui.screens.SongEditorScreen
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.omerek.guitarlearn.data.Tool
 import com.omerek.guitarlearn.ui.screens.ChordLibraryScreen
 import com.omerek.guitarlearn.ui.screens.LessonDetailScreen
@@ -48,14 +59,19 @@ enum class Tab(val label: String, val icon: ImageVector) {
  * Ders veya şarkı açıkken geri tuşu listeye döner.
  */
 @Composable
-fun GuitarApp(progress: Progress) {
+fun GuitarApp(progress: Progress, userSongs: UserSongStore) {
     var tab by rememberSaveable { mutableStateOf(Tab.LESSONS) }
     var openLesson by rememberSaveable { mutableStateOf<String?>(null) }
     var openSong by rememberSaveable { mutableStateOf<String?>(null) }
+    // Düzenlenen kullanıcı şarkısı: "new" ya da kimliği
+    var editing by rememberSaveable { mutableStateOf<String?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val backup = rememberBackupActions(userSongs) { msg -> scope.launch { snackbar.showSnackbar(msg) } }
     // Şarkıya dersten gelindiyse geri tuşu derse dönsün
     var songFromLesson by rememberSaveable { mutableStateOf(false) }
 
-    BackHandler(enabled = openSong != null || openLesson != null || tab != Tab.LESSONS) {
+    BackHandler(enabled = editing == null && (openSong != null || openLesson != null || tab != Tab.LESSONS)) {
         when {
             openSong != null -> {
                 openSong = null
@@ -69,6 +85,7 @@ fun GuitarApp(progress: Progress) {
     Scaffold(
         // Başlık alanları durum çubuğunun arkasına uzanır; boşlukları ekranlar kendisi ayarlar
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest, tonalElevation = 0.dp) {
                 Tab.entries.forEach { t ->
@@ -76,6 +93,7 @@ fun GuitarApp(progress: Progress) {
                         selected = tab == t,
                         onClick = {
                             if (tab == t) { openLesson = null; openSong = null }
+                            editing = null
                             tab = t
                             songFromLesson = false
                         },
@@ -112,13 +130,53 @@ fun GuitarApp(progress: Progress) {
             Tab.CHORDS -> ChordLibraryScreen(modifier)
             Tab.SONGS -> {
                 val songId = openSong
-                if (songId == null) {
-                    SongsScreen(modifier, onOpen = { openSong = it })
-                } else {
-                    SongDetailScreen(songId, modifier, onBack = {
-                        openSong = null
-                        if (songFromLesson) { tab = Tab.LESSONS; songFromLesson = false }
-                    })
+                val editId = editing
+                val userId = songId?.removePrefix(UserSong.ID_PREFIX)?.takeIf { songId.startsWith(UserSong.ID_PREFIX) }
+                when {
+                    editId != null -> {
+                        val initial = if (editId == "new") null else userSongs.get(editId)
+                        BackHandler { editing = null }
+                        SongEditorScreen(
+                            initial = initial,
+                            modifier = modifier,
+                            onSave = { song ->
+                                userSongs.upsert(song)
+                                editing = null
+                                openSong = UserSong.ID_PREFIX + song.id
+                                scope.launch { snackbar.showSnackbar("\"${song.title}\" kaydedildi") }
+                            },
+                            onCancel = { editing = null },
+                            onDelete = { id ->
+                                userSongs.delete(id)
+                                editing = null
+                                openSong = null
+                            },
+                        )
+                    }
+                    songId == null -> SongsScreen(
+                        userSongs = userSongs.songs,
+                        modifier = modifier,
+                        onOpen = { openSong = it },
+                        onNew = { editing = "new" },
+                        onExport = backup.export,
+                        onImport = backup.import,
+                    )
+                    else -> {
+                        val song = if (userId != null) userSongs.get(userId)?.toSong() else Songs.get(songId)
+                        if (song == null) {
+                            LaunchedEffect(songId) { openSong = null }
+                        } else {
+                            SongDetailScreen(
+                                song = song,
+                                modifier = modifier,
+                                onBack = {
+                                    openSong = null
+                                    if (songFromLesson) { tab = Tab.LESSONS; songFromLesson = false }
+                                },
+                                onEdit = userId?.let { id -> { editing = id } },
+                            )
+                        }
+                    }
                 }
             }
             Tab.TUNER -> TunerScreen(modifier)

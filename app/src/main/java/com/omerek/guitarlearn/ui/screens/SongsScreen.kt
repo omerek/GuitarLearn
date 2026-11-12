@@ -21,6 +21,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Upload
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.omerek.guitarlearn.data.UserSong
+import com.omerek.guitarlearn.ui.components.SectionTitle
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -52,7 +66,15 @@ private val CoverColors = listOf(
 private val LevelNames = listOf("Çok kolay", "Kolay", "Orta", "Zorlayıcı")
 
 @Composable
-fun SongsScreen(modifier: Modifier = Modifier, onOpen: (String) -> Unit) {
+fun SongsScreen(
+    userSongs: List<UserSong>,
+    modifier: Modifier = Modifier,
+    onOpen: (String) -> Unit,
+    onNew: () -> Unit = {},
+    onExport: () -> Unit = {},
+    onImport: () -> Unit = {},
+) {
+    var menu by remember { mutableStateOf(false) }
     LazyColumn(
         modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp),
@@ -61,10 +83,59 @@ fun SongsScreen(modifier: Modifier = Modifier, onOpen: (String) -> Unit) {
         item {
             ScreenHeader(
                 "Şarkılar",
-                "Anonim türküler, kamu malı şarkılar ve etütler",
+                "Kendi şarkıların ve hazır örnekler",
                 icon = Icons.Rounded.LibraryMusic,
             )
             Spacer(Modifier.height(6.dp))
+        }
+        item {
+            Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("Şarkılarım", Modifier.weight(1f), trailing = if (userSongs.isEmpty()) null else "${userSongs.size}")
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "Yedekleme") }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Yedekle (dosyaya kaydet)") },
+                            leadingIcon = { Icon(Icons.Rounded.Upload, contentDescription = null) },
+                            enabled = userSongs.isNotEmpty(),
+                            onClick = { menu = false; onExport() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Yedekten yükle") },
+                            leadingIcon = { Icon(Icons.Rounded.Download, contentDescription = null) },
+                            onClick = { menu = false; onImport() },
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Button(
+                onClick = onNew,
+                modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Yeni şarkı ekle", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        if (userSongs.isEmpty()) {
+            item {
+                Text(
+                    "Çalmak istediğin şarkıların sözlerini ve akorlarını kendin girebilirsin. Şarkılar yalnızca bu telefonda saklanır; " +
+                        "sağ üstteki menüden yedek dosyası alıp uygulamayı yeniden kurduğunda geri yükleyebilirsin.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
+            }
+        }
+        items(userSongs, key = { "u-" + it.id }) { us ->
+            SongCard(us.toSong().copy(level = 0), Modifier.padding(horizontal = 16.dp)) { onOpen(UserSong.ID_PREFIX + us.id) }
+        }
+        item {
+            SectionTitle("Hazır şarkılar ve etütler", Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), trailing = "${Songs.all.size}")
         }
         items(Songs.all.sortedBy { it.level }, key = { it.id }) { song ->
             SongCard(song, Modifier.padding(horizontal = 16.dp)) { onOpen(song.id) }
@@ -81,7 +152,7 @@ private fun SongCard(song: Song, modifier: Modifier = Modifier, onClick: () -> U
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            val colors = CoverColors[(song.level - 1).coerceIn(0, CoverColors.lastIndex)]
+            val colors = if (song.level == 0) listOf(Color(0xFFA1887F), Color(0xFF5D4037)) else CoverColors[(song.level - 1).coerceIn(0, CoverColors.lastIndex)]
             Box(
                 Modifier
                     .size(64.dp)
@@ -98,7 +169,14 @@ private fun SongCard(song: Song, modifier: Modifier = Modifier, onClick: () -> U
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(song.title, style = MaterialTheme.typography.titleMedium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (song.level == 0) {
+                    Text(
+                        "${song.source} · ${song.bpm} BPM",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                } else Row(verticalAlignment = Alignment.CenterVertically) {
                     repeat(4) { i ->
                         Icon(
                             Icons.Rounded.Star,
@@ -117,7 +195,7 @@ private fun SongCard(song: Song, modifier: Modifier = Modifier, onClick: () -> U
                 }
                 Spacer(Modifier.height(6.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    song.chords.forEach { ChordPill(it) }
+                    song.chords.take(10).forEach { ChordPill(it) }
                 }
             }
         }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Timer
@@ -64,7 +65,7 @@ import com.omerek.guitarlearn.data.Chords
 import com.omerek.guitarlearn.data.Segment
 import com.omerek.guitarlearn.data.SongLine
 import com.omerek.guitarlearn.data.SongParser
-import com.omerek.guitarlearn.data.Songs
+import com.omerek.guitarlearn.data.Song
 import com.omerek.guitarlearn.ui.components.BeatDots
 import com.omerek.guitarlearn.ui.components.ChordDiagram
 import com.omerek.guitarlearn.ui.components.ChordDialog
@@ -85,9 +86,9 @@ import com.omerek.guitarlearn.led.LedController
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 @Composable
-fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -> Unit) {
-    val song = Songs.get(songId) ?: return
-    val lines = remember(songId) { SongParser.parse(song.content) }
+fun SongDetailScreen(song: Song, modifier: Modifier = Modifier, onBack: () -> Unit, onEdit: (() -> Unit)? = null) {
+    val songId = song.id
+    val lines = remember(song.content) { SongParser.parse(song.content) }
     val scroll = rememberScrollState()
     var autoScroll by remember { mutableStateOf(false) }
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
@@ -173,8 +174,16 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
             ScreenHeader(
                 title = song.title,
                 subtitle = "${song.source} · ${song.bpm} BPM · ${song.beatsPerBar}/4",
-                eyebrow = "Şarkı",
+                eyebrow = if (onEdit != null) "Şarkılarım" else "Şarkı",
                 onBack = onBack,
+                actions = onEdit?.let { edit ->
+                    {
+                        TextButton(onClick = edit) {
+                            Icon(Icons.Rounded.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Text(" Düzenle", color = Color.White)
+                        }
+                    }
+                },
             )
             Column(Modifier.padding(16.dp)) {
             // Şarkıdaki akorlar
@@ -182,14 +191,26 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
             Spacer(Modifier.height(8.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 song.chords.forEach { name ->
-                    Chords.get(name)?.let { chord ->
+                    val chord = Chords.get(name)
+                    if (chord == null) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                        ) {
+                            Column(Modifier.padding(10.dp).width(84.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(16.dp))
+                                Text("Şema yok", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                    chord?.let { chord ->
                         Card(
                             Modifier.clickable { dialogChord = name },
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                         ) {
                             Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(chord.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                                Text(name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                                 ChordDiagram(chord, width = 84.dp, showStringNames = false)
                             }
                         }
