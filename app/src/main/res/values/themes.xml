@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.GuitarLearn" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#FF3E2723</item>
+        <item name="android:windowBackground">#FFFFF8F0</item>
+    </style>
+</resources>
