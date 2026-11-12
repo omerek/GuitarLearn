@@ -1,0 +1,49 @@
+name: Android APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Testleri çalıştır
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: APK derle
+        run: |
+          ./gradlew --no-daemon assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk GitarOgren.apk
+
+      - name: APK'yı eser olarak yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: GitarOgren-apk
+          path: GitarOgren.apk
+
+      - name: Telefondan indirilebilir sürüm yayınla (main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete son-surum --cleanup-tag -y || true
+          gh release create son-surum GitarOgren.apk \
+            --target "$GITHUB_SHA" \
+            --title "Gitar Öğren – son sürüm" \
+            --notes "main dalından otomatik derlendi (${GITHUB_SHA::7}). Telefonda GitarOgren.apk dosyasını indirip aç." \
+            --prerelease
