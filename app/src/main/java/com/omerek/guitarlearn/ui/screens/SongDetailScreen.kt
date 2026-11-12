@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.omerek.guitarlearn.ui.components.ScreenHeader
 import com.omerek.guitarlearn.ui.components.SectionTitle
 import com.omerek.guitarlearn.ui.platform.KeepScreenOn
+import com.omerek.guitarlearn.ui.platform.rememberMicPermission
 import com.omerek.guitarlearn.ui.theme.Amber
 import com.omerek.guitarlearn.ui.theme.WoodDark
 import androidx.compose.foundation.gestures.scrollBy
@@ -70,6 +71,18 @@ import com.omerek.guitarlearn.ui.components.ChordDialog
 import com.omerek.guitarlearn.ui.components.StrumPatternView
 import com.omerek.guitarlearn.ui.components.TipBox
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.material.icons.rounded.Hearing
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import com.omerek.guitarlearn.audio.ChordListener
+import com.omerek.guitarlearn.audio.ChordMatcher
+import com.omerek.guitarlearn.led.LedButton
+import com.omerek.guitarlearn.led.LedController
+import kotlinx.coroutines.flow.MutableSharedFlow
 
 @Composable
 fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -> Unit) {
@@ -82,6 +95,64 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
     val metronome by Metronome.state.collectAsState()
     val owner = "song:${song.id}"
     val metronomeOn = metronome.running && metronome.owner == owner
+
+    // Takip modu: sıradaki akoru ekranda ve gitardaki LED'lerde gösterir, mikrofonla doğru akoru duyunca ilerler
+    val follow = remember(songId) { FollowState(songSteps(lines)) }
+    var following by rememberSaveable { mutableStateOf(false) }
+    val mic = rememberMicPermission()
+    val micGranted = mic.granted
+    fun startFollowing() {
+        following = true
+        if (!mic.granted) mic.request()
+    }
+
+    LaunchedEffect(following, follow.index, follow.finished) {
+        if (following && !follow.finished) LedController.show(follow.current?.let { Chords.get(it) }) else LedController.clear()
+    }
+    DisposableEffect(songId) { onDispose { LedController.clear() } }
+
+    // Gitardaki önceki/sonraki düğmeleri
+    LaunchedEffect(songId) {
+        LedController.buttons.collect { b ->
+            if (!following) { startFollowing(); return@collect }
+            when (b) {
+                LedButton.PREVIOUS -> follow.back()
+                LedButton.NEXT -> if (follow.finished) follow.restart() else follow.advance()
+            }
+        }
+    }
+
+    // Mikrofon: her vuruşta beklenen akorla karşılaştır
+    val listenNow = following && micGranted && follow.micOn && !follow.finished
+    LaunchedEffect(listenNow) {
+        if (!listenNow) return@LaunchedEffect
+        val matcher = ChordMatcher(Chords.all)
+        val strums = MutableSharedFlow<FloatArray>(extraBufferCapacity = 4)
+        val listener = ChordListener { strums.tryEmit(it) }
+        listener.start()
+        try {
+            strums.collect { chroma ->
+                val expected = follow.current?.let { Chords.get(it) } ?: return@collect
+                val m = matcher.match(chroma, expected)
+                if (m.ok) follow.advance()
+                follow.lastMatch = m
+            }
+        } finally {
+            listener.stop()
+        }
+    }
+
+    // Çalınan satırı ekranda görünür tut
+    val lineCoords = remember(songId) { mutableStateMapOf<Int, LayoutCoordinates>() }
+    var viewport by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val topGap = with(LocalDensity.current) { 140.dp.toPx() }
+    LaunchedEffect(following, follow.index) {
+        if (!following) return@LaunchedEffect
+        val start = lineCoords.keys.filter { it <= follow.index }.maxOrNull() ?: return@LaunchedEffect
+        val line = lineCoords[start]?.takeIf { it.isAttached } ?: return@LaunchedEffect
+        val box = viewport?.takeIf { it.isAttached } ?: return@LaunchedEffect
+        scroll.animateScrollBy(line.positionInRoot().y - box.positionInRoot().y - topGap)
+    }
 
     // Şarkı açıkken ekran kapanmasın; çıkınca metronom dursun
     KeepScreenOn()
@@ -97,7 +168,7 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
         }
     }
 
-    Box(modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize().onGloballyPositioned { viewport = it }) {
         Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
             ScreenHeader(
                 title = song.title,
@@ -133,6 +204,7 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
             }
             Spacer(Modifier.height(16.dp))
 
+            var stepCounter = 0
             lines.forEach { line ->
                 when (line) {
                     is SongLine.Blank -> Spacer(Modifier.height(14.dp))
@@ -146,10 +218,20 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
                             .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     )
-                    is SongLine.Lyric -> LyricLine(line.segments, onChord = { dialogChord = it })
+                    is SongLine.Lyric -> {
+                        val start = stepCounter
+                        stepCounter += line.segments.count { it.chord != null }
+                        LyricLine(
+                            line.segments,
+                            onChord = { dialogChord = it },
+                            firstStep = start,
+                            activeStep = if (following) follow.index else -1,
+                            modifier = Modifier.onGloballyPositioned { lineCoords[start] = it },
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.height(160.dp))
+            Spacer(Modifier.height(if (following) 420.dp else 160.dp))
             }
         }
 
@@ -161,6 +243,12 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
             shadowElevation = 8.dp,
         ) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                if (following) {
+                    FollowPanel(follow, micAvailable = micGranted, onToggleMic = {
+                        if (!mic.granted) mic.request() else follow.micOn = !follow.micOn
+                    })
+                    Spacer(Modifier.height(8.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ControlButton(
                         icon = if (autoScroll) Icons.Rounded.Pause else Icons.Rounded.ArrowDownward,
@@ -174,6 +262,13 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
                         label = "${song.bpm} BPM",
                         active = metronomeOn,
                         onClick = { if (metronomeOn) Metronome.stop() else Metronome.start(song.bpm, song.beatsPerBar, owner) },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    ControlButton(
+                        icon = Icons.Rounded.Hearing,
+                        label = "Takip",
+                        active = following,
+                        onClick = { if (following) following = false else startFollowing() },
                     )
                     Spacer(Modifier.weight(1f))
                     if (metronomeOn) BeatDots(song.beatsPerBar, metronome.beat, dotSize = 12, onDark = true)
@@ -200,23 +295,35 @@ fun SongDetailScreen(songId: String, modifier: Modifier = Modifier, onBack: () -
 /** Bir söz satırı: her kelimenin üstünde (varsa) akoru durur; satır ekrana sığmazsa alta kayar. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LyricLine(segments: List<Segment>, onChord: (String) -> Unit) {
-    val pieces = remember(segments) {
+private fun LyricLine(
+    segments: List<Segment>,
+    onChord: (String) -> Unit,
+    firstStep: Int = 0,
+    activeStep: Int = -1,
+    modifier: Modifier = Modifier,
+) {
+    // Her parça: (akor, akorun şarkıdaki adım numarası, kelime)
+    val pieces = remember(segments, firstStep) {
+        var step = firstStep
         segments.flatMap { seg ->
             val words = Regex("""\S+\s*|\s+""").findAll(seg.text).map { it.value }.toList().ifEmpty { listOf("") }
-            words.mapIndexed { i, w -> (if (i == 0) seg.chord else null) to w }
+            val segStep = if (seg.chord != null) step++ else -1
+            words.mapIndexed { i, w -> Triple(if (i == 0) seg.chord else null, if (i == 0) segStep else -1, w) }
         }
     }
-    FlowRow(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        pieces.forEach { (chord, word) ->
+    FlowRow(modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        pieces.forEach { (chord, step, word) ->
+            val active = chord != null && step == activeStep
             val gap = if (word.isNotEmpty() && word.last().isWhitespace()) 6.dp else 0.dp
             Column(Modifier.padding(end = gap)) {
                 Text(
                     text = chord ?: " ",
-                    color = MaterialTheme.colorScheme.tertiary,
+                    color = if (active) WoodDark else MaterialTheme.colorScheme.tertiary,
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 17.sp,
-                    modifier = (if (chord != null) Modifier.clickable { onChord(chord) } else Modifier).padding(end = 4.dp),
+                    modifier = (if (chord != null) Modifier.clickable { onChord(chord) } else Modifier)
+                        .then(if (active) Modifier.background(Amber, RoundedCornerShape(6.dp)).padding(horizontal = 4.dp) else Modifier)
+                        .padding(end = 4.dp),
                 )
                 Text(text = word.trimEnd(), fontSize = 18.sp)
             }

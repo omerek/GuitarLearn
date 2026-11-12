@@ -10,6 +10,7 @@ sourceSets {
         kotlin.exclude(
             "**/MainActivity.kt", "**/audio/TunerEngine.kt", "**/audio/SoundPlayer.kt", "**/audio/Metronome.kt",
             "**/data/Progress.kt", "**/ui/platform/Platform.kt", "**/ui/screens/TunerScreen.kt",
+            "**/led/LedController.kt", "**/audio/ChordListener.kt",
         )
     }
 }

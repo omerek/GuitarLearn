@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -170,6 +171,12 @@ fun FingerLegend(modifier: Modifier = Modifier) {
 @Composable
 fun ChordDialog(name: String, onDismiss: () -> Unit) {
     val chord = Chords.get(name)
+    // Pencere açıkken akor gitardaki LED'lerde de yansın
+    androidx.compose.runtime.DisposableEffect(chord) {
+        val previous = com.omerek.guitarlearn.led.LedController.currentChord
+        com.omerek.guitarlearn.led.LedController.show(chord)
+        onDispose { com.omerek.guitarlearn.led.LedController.show(previous) }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Kapat") } },
@@ -185,10 +192,22 @@ fun ChordDialog(name: String, onDismiss: () -> Unit) {
             if (chord == null) {
                 Text("Bu akor kütüphanede yok.")
             } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                ) {
                     ChordDiagram(chord, width = 200.dp)
                     Spacer(Modifier.height(10.dp))
                     FingerLegend()
+                    Spacer(Modifier.height(14.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Gitarı tutuşuna göre", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                        LedStatusChip()
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    StringFretboard(chord)
+                    Spacer(Modifier.height(6.dp))
+                    StringColorLegend()
                     if (chord.tip.isNotEmpty()) {
                         Spacer(Modifier.height(12.dp))
                         TipBox(chord.tip)
