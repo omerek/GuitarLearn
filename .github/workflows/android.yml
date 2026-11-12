@@ -68,3 +68,14 @@ jobs:
         with:
           name: ekran-goruntuleri
           path: tools/preview/build/shots/*.png
+
+      - name: Ekran görüntülerini ayrı dala koy (tarayıcıdan bakmak için)
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          cd tools/preview/build/shots
+          git init -q
+          git checkout -q -b ekran-goruntuleri
+          git add *.png
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" \
+            commit -q -m "Ekran görüntüleri (${GITHUB_SHA::7})"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ekran-goruntuleri
