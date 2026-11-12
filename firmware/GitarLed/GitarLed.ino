@@ -1,5 +1,6 @@
 /*
- * Gitar LED kartı — Wemos/Lolin ESP32-S2 Mini (USB) ya da ESP32-S3FH4R2 kartları (USB + Bluetooth)
+ * Gitar LED kartı — Wemos/Lolin ESP32-S2 Mini (USB), ESP32-S3FH4R2 kartları (USB + Bluetooth)
+ * ya da klasik Arduino Nano / ATmega328P (yalnızca USB; telefondan güncelleme yok)
  *
  * Telefon (Gitar Öğren uygulaması) USB-OTG ile bağlanır; kart USB seri port (CDC) olarak görünür.
  * ESP32-S3'te ayrıca Bluetooth Low Energy (Nordic UART servisi, adı "GitarLED") ile kablosuz bağlanılır.
@@ -22,12 +23,24 @@
  *   K P  /  K N                -> önceki / sonraki düğmesine basıldı
  */
 #include <Adafruit_NeoPixel.h>
-#include <Update.h>
 
-#define FW_VERSION "1.1.0"
+#define FW_VERSION "1.2.0"
 
 // ---- Bağlantılar (README'deki şemaya bak) ----
-#if CONFIG_IDF_TARGET_ESP32S3
+#if defined(ARDUINO_ARCH_AVR)
+// Arduino Nano: 2 KB RAM; LED ve renk sayısı buna göre sınırlı
+#define HAS_BLE 0
+#define HAS_OTA 0
+#define BOARD_NAME "NANO"
+const int LED_PIN = 6;         // WS2812B DIN (330 ohm direnç üzerinden)
+const int BTN_PREV_PIN = 2;    // önceki akor düğmesi -> GND
+const int BTN_NEXT_PIN = 3;    // sonraki akor düğmesi -> GND
+const int BOARD_LED_PIN = 13;  // kart üzerindeki "L" LED'i
+const int MAX_LEDS = 30;
+const int MAX_COLORS = 4;
+const unsigned int LINE_MAX = 160;
+#elif CONFIG_IDF_TARGET_ESP32S3
+#define HAS_OTA 1
 #define HAS_BLE 1
 #define BOARD_NAME "S3"
 const int LED_PIN = 4;         // WS2812B DIN (330 ohm direnç üzerinden)
@@ -35,6 +48,7 @@ const int BTN_PREV_PIN = 5;    // önceki akor düğmesi -> GND
 const int BTN_NEXT_PIN = 6;    // sonraki akor düğmesi -> GND
 const int BOARD_LED_PIN = -1;  // S3 kartlarının yerleşik LED'i farklı; kullanılmıyor
 #else
+#define HAS_OTA 1
 #define HAS_BLE 0
 #define BOARD_NAME "S2"
 const int LED_PIN = 16;        // WS2812B DIN (330 ohm direnç üzerinden)
@@ -99,8 +113,15 @@ void setupBle() {
 const bool bleConnected = false;
 #endif
 
+#if HAS_OTA
+#include <Update.h>
+#endif
+
+#if !defined(ARDUINO_ARCH_AVR)
 const int MAX_LEDS = 150;
 const int MAX_COLORS = 6;
+const unsigned int LINE_MAX = 2000;
+#endif
 const unsigned long CYCLE_MS = 400;  // aynı perdede birden fazla tel varsa renk değiştirme aralığı
 
 Adafruit_NeoPixel strip(MAX_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -270,6 +291,7 @@ void parseFrame(const String &s) {
 // ---------------------------------------------------------------------------
 // USB üzerinden yazılım güncellemesi (OTA bölmesine yazılır; MD5 tutmazsa eski yazılım kalır)
 
+#if HAS_OTA
 const size_t UPDATE_CHUNK = 4096;
 
 void updateProgress(size_t done, size_t total) {
@@ -325,8 +347,12 @@ void firmwareUpdate(const String &args) {
   delay(600);
   ESP.restart();
 }
+#endif
+
+bool gotCommand = false;
 
 void handleLine(String s, bool fromUsb) {
+  gotCommand = true;
   s.trim();
   if (s.length() == 0) return;
   char cmd = s[0];
@@ -363,8 +389,12 @@ void handleLine(String s, bool fromUsb) {
       connectedAnimation();
       break;
     case 'U':
+#if HAS_OTA
       if (fromUsb) firmwareUpdate(s.substring(2));
       else sendLine("U ERR yalnizca USB");
+#else
+      sendLine("U ERR desteklenmiyor");
+#endif
       break;
   }
 }
@@ -373,7 +403,7 @@ void feedChar(String &buf, char c, bool fromUsb) {
   if (c == '\n') {
     handleLine(buf, fromUsb);
     buf = "";
-  } else if (buf.length() < 2000) {
+  } else if (buf.length() < LINE_MAX) {
     buf += c;
   }
 }
@@ -414,8 +444,11 @@ void setup() {
   pinMode(BTN_NEXT_PIN, INPUT_PULLUP);
   if (BOARD_LED_PIN >= 0) pinMode(BOARD_LED_PIN, OUTPUT);
   // Güncellemede bir parça (4096 bayt) tamamen tampona sığsın; S3'ün yerleşik USB'si taşan baytı düşürür
+#if HAS_OTA
   Serial.setRxBufferSize(UPDATE_CHUNK * 2);
+#endif
   Serial.begin(115200);
+  line.reserve(LINE_MAX);
   strip.begin();
   strip.setBrightness(brightness);
   strip.clear();
@@ -432,7 +465,12 @@ void loop() {
   readButtons();
 
   // USB'de uygulama portu açınca (DTR) ya da Bluetooth bağlanınca true olur
+#if defined(ARDUINO_ARCH_AVR)
+  // Nano'nun USB-seri çipi bağlantıyı bildirmez: ilk komut gelince bağlı sayılır
+  bool connected = gotCommand;
+#else
   bool connected = (bool)Serial || bleConnected;
+#endif
   if (!connected) {
     if (wasConnected) clearFrame();
     wasConnected = false;

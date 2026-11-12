@@ -162,7 +162,10 @@ object LedController {
         if (link != null) dropLink("USB'ye geçiliyor")
         connecting = true
         writer.execute {
-            val p = try { CdcPort.open(usb, device) } catch (e: Exception) { null }
+            if (!CdcPort.hasCdc(device)) setState(LedState(LedStatus.NO_DEVICE, "Arduino açılıyor…"))
+            val p: LedLink? = try {
+                if (CdcPort.hasCdc(device)) CdcPort.open(usb, device) else SerialChipLink.open(usb, device)
+            } catch (e: Exception) { null }
             connecting = false
             if (p == null) {
                 setState(LedState(LedStatus.ERROR, "Karta bağlanılamadı"))
@@ -177,6 +180,7 @@ object LedController {
         val all = usb.deviceList.values
         return all.firstOrNull { it.vendorId == ESPRESSIF_VID && CdcPort.hasCdc(it) }
             ?: all.firstOrNull { CdcPort.hasCdc(it) }
+            ?: all.firstOrNull { SerialChipLink.driverFor(it) != null } // Arduino Nano (CH340/FTDI/CP210x)
     }
 
     // ---------------------------------------------------------------- Bluetooth
@@ -310,6 +314,8 @@ object LedController {
         sendNow(LedProtocol.hello())
         sendSetup()
         sendNow(LedProtocol.connectedAnimation())
+        // Animasyon sürerken kart okumaz; Nano'nun 64 baytlık tamponu taşmasın
+        Thread.sleep(900)
         sendNow(LedProtocol.frame(LedLayout.pixels(current, _config.value)))
     }
 
@@ -327,6 +333,7 @@ object LedController {
     fun checkFirmware(bin: ByteArray): String? {
         val s = _state.value
         if (s.status != LedStatus.CONNECTED || s.transport != LedTransport.USB) return "Güncelleme yalnızca USB ile yapılabilir. Kartı kabloyla bağla."
+        if (s.board == "NANO") return "Arduino Nano telefondan güncellenemez. Yeni yazılımı bilgisayardan Arduino IDE ile yükle."
         if (s.firmwareVersion == null) return "Karttaki yazılım güncellemeyi desteklemiyor. Bu ilk sefer için bilgisayardan yükle."
         return FirmwareImage.problem(bin, s.board)
     }
@@ -389,7 +396,15 @@ object LedController {
 
     fun clear() = show(null)
 
-    fun test() = send(LedProtocol.test())
+    fun test() {
+        if (link == null) return
+        writer.execute {
+            sendNow(LedProtocol.test())
+            // Test animasyonu bitene kadar bekle (kart bu sırada komut okumaz)
+            Thread.sleep((6L * _config.value.ledCount * 30 + 600).coerceAtMost(8000))
+            sendNow(LedProtocol.frame(LedLayout.pixels(current, _config.value)))
+        }
+    }
 
     fun updateConfig(newConfig: LedConfig) {
         val c = newConfig.copy(fretCount = newConfig.fretCount.coerceIn(1, 24), brightness = newConfig.brightness.coerceIn(5, 255))

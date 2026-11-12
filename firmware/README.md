@@ -1,7 +1,7 @@
-# Gitar LED kartı (ESP32-S2 Mini / ESP32-S3 + WS2812B)
+# Gitar LED kartı (ESP32-S2 Mini / ESP32-S3 / Arduino Nano + WS2812B)
 
 Telefon, Gitar Öğren uygulamasıyla USB-OTG kablosu üzerinden karta bağlanır. ESP32-S3 kartı kullanılırsa
-Bluetooth ile kablosuz da bağlanabilir. Uygulama hangi perdede hangi tele
+Bluetooth ile kablosuz da bağlanabilir. Arduino Nano da (klonlar dahil) kablolu olarak çalışır. Uygulama hangi perdede hangi tele
 basılacağını gönderir, kart da perdelerdeki LED'leri yakar. Gitara takılan iki düğme önceki ve sonraki akora geçirir.
 
 ## Malzemeler
@@ -34,8 +34,6 @@ basılacağını gönderir, kart da perdelerdeki LED'leri yakar. Gitara takılan
  └────────────┘
 ```
 
-| Kart pini | Nereye | Görev |
-|---|---|---|
 | Görev | ESP32-S2 Mini | ESP32-S3 | Nereye |
 |---|---|---|---|
 | LED verisi | GPIO 16 | GPIO 4 | 330 Ω üzerinden 1. LED'in DIN ucu |
@@ -96,6 +94,38 @@ Telefon kablosuzda kartı beslemediği için kartın ve LED'lerin tek bir kaynak
   harici beslemeyi 5V pininden ayır, ya da 5V pinine giden hatta bir Schottky diyot (ör. 1N5817) koy.
 - Ortak toprak kuralı burada da geçerli: tüm GND'ler birleşik olmalı.
 
+## Arduino Nano ile kullanım (yalnızca USB)
+
+Klasik Arduino Nano ve mini USB girişli klonları (ATmega328P, CH340 USB çipi) de çalışır. ESP32'ye göre farklar:
+
+- **Bluetooth yok**, yalnızca USB-OTG kablosuyla bağlanır. Telefonda mini USB ↔ USB-C OTG kablosu gerekir.
+- **Telefondan güncelleme yok.** Yeni kart yazılımını bilgisayardan Arduino IDE ile yüklersin.
+- **En fazla 30 LED** (Nano'nun belleği 2 KB). Gitarın tüm perdeleri için yeter.
+- Nano 5 V çalıştığı için **seviye çevirici gerekmez**, LED'ler daha kararlı yanar.
+- Telefona takınca kart yeniden başlar; uygulama ~2,5 saniye bekleyip sonra bağlanır. Bu normal.
+
+| Görev | Nano pini | Nereye |
+|---|---|---|
+| LED verisi | **D6** | 330 Ω üzerinden 1. LED'in DIN ucu |
+| Önceki akor | **D2** | Düğme → GND |
+| Sonraki akor | **D3** | Düğme → GND |
+| Toprak | **GND** | Harici 5 V kaynağın (−) ucu ve LED GND (ortak toprak şart) |
+| 5V | **Bağlama** | Kart telefondan beslenir, LED'ler harici kaynaktan |
+
+Kart üstündeki L LED'i (D13) bağlantı durumunu gösterir: bağlanınca yanar.
+
+**Yükleme (Arduino IDE):**
+
+1. Bilgisayara **CH340 sürücüsünü** kur (Windows'ta çoğu zaman kendiliğinden gelir; gelmezse "CH340 driver" ara).
+2. **Kütüphane yöneticisi**'nden "Adafruit NeoPixel" kütüphanesini kur.
+3. `firmware/GitarLed/GitarLed.ino` dosyasını aç.
+4. **Araçlar → Kart: Arduino Nano**, **İşlemci: ATmega328P (Old Bootloader)** (klonlarda genelde bu).
+   Yükleme "not in sync" hatası verirse İşlemci'yi **ATmega328P** yapıp tekrar dene.
+5. Portu seç ve **Yükle**'ye bas.
+
+PlatformIO ile: `pio run -e nano -t upload` (eski önyükleyici için ayarlı; yeni önyükleyicili kartta
+`platformio.ini` içinde `board = nanoatmega328new` yap).
+
 ## Yazılımı yükleme
 
 ### Arduino IDE
@@ -119,6 +149,7 @@ Telefon kablosuzda kartı beslemediği için kartın ve LED'lerin tek bir kaynak
 cd firmware/GitarLed
 pio run -e lolin_s2_mini -t upload   # ESP32-S2 Mini
 pio run -e esp32s3 -t upload         # ESP32-S3 (USB + Bluetooth)
+pio run -e nano -t upload            # Arduino Nano / klon
 ```
 
 Derlenmiş dosyalar GitHub Actions'ta "GitarLed-firmware" eseri olarak da indirilebilir.

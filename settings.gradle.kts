@@ -10,6 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // usb-serial-for-android (Arduino Nano'daki CH340/FTDI/CP210x USB-seri çipleri için)
+        maven("https://jitpack.io")
     }
 }
 
