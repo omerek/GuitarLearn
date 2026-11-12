@@ -1,0 +1,27 @@
+name: Gitar LED kartı yazılımı
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'firmware/**', '.github/workflows/firmware.yml' ]
+  pull_request:
+    paths: [ 'firmware/**', '.github/workflows/firmware.yml' ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: PlatformIO kur
+        run: pip install platformio
+      - name: Derle (ESP32-S2 Mini)
+        run: pio run -d firmware/GitarLed
+      - name: Derlenmiş dosyayı yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: GitarLed-firmware
+          path: firmware/GitarLed/.pio/build/lolin_s2_mini/firmware.bin
