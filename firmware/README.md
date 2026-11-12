@@ -1,13 +1,15 @@
-# Gitar LED kartı (ESP32-S2 Mini + WS2812B)
+# Gitar LED kartı (ESP32-S2 Mini / ESP32-S3 + WS2812B)
 
-Telefon, Gitar Öğren uygulamasıyla USB-OTG kablosu üzerinden karta bağlanır. Uygulama hangi perdede hangi tele
+Telefon, Gitar Öğren uygulamasıyla USB-OTG kablosu üzerinden karta bağlanır. ESP32-S3 kartı kullanılırsa
+Bluetooth ile kablosuz da bağlanabilir. Uygulama hangi perdede hangi tele
 basılacağını gönderir, kart da perdelerdeki LED'leri yakar. Gitara takılan iki düğme önceki ve sonraki akora geçirir.
 
 ## Malzemeler
 
 | Parça | Not |
 |---|---|
-| Wemos/Lolin ESP32-S2 Mini (S2FN4R2) | USB-C, yerleşik USB |
+| Wemos/Lolin ESP32-S2 Mini (S2FN4R2) | USB-C, yerleşik USB. Yalnızca kablolu |
+| ya da ESP32-S3FH4R2 kartı (ör. Lolin S3 Mini, Waveshare ESP32-S3-Zero) | USB + Bluetooth (BLE) |
 | WS2812B 5 V LED şerit (60 LED/m) | Her perdeye 1 LED. Başlangıç için 5 LED yeterli, istediğin kadar eklenebilir |
 | 5 V harici güç kaynağı | 1 A, 16 LED'e kadar yeter. Hesap aşağıda |
 | 330 Ω direnç | Veri hattına seri |
@@ -34,12 +36,20 @@ basılacağını gönderir, kart da perdelerdeki LED'leri yakar. Gitara takılan
 
 | Kart pini | Nereye | Görev |
 |---|---|---|
-| GPIO 16 | 330 Ω üzerinden 1. LED'in DIN ucu | LED verisi |
-| GPIO 11 | Düğme → GND | Önceki akor |
-| GPIO 12 | Düğme → GND | Sonraki akor |
+| Görev | ESP32-S2 Mini | ESP32-S3 | Nereye |
+|---|---|---|---|
+| LED verisi | GPIO 16 | GPIO 4 | 330 Ω üzerinden 1. LED'in DIN ucu |
+| Önceki akor | GPIO 11 | GPIO 5 | Düğme → GND |
+| Sonraki akor | GPIO 12 | GPIO 6 | Düğme → GND |
+
+Diğer bağlantılar iki kartta da aynı:
+
+| Kart pini | Nereye | Görev |
+|---|---|---|
 | GND | Harici 5 V kaynağın (−) ucu ve LED GND | **Ortak toprak şart** |
 | 5V / VBUS | **Bağlama** | Harici 5 V'u buraya verme (aşağıya bak) |
 
+Şemadaki GPIO numaraları S2 Mini içindir; S3 kartında üstteki tabloya göre değiştir.
 Düğmeler için direnç gerekmez, kartın iç pull-up direnci kullanılıyor. Pin numaraları
 `GitarLed.ino` dosyasının başında yazıyor, istersen oradan değiştirebilirsin.
 
@@ -67,6 +77,25 @@ Düğmeler için direnç gerekmez, kartın iç pull-up direnci kullanılıyor. P
   veri hattına 74AHCT125 (3,3 V → 5 V) seviye çevirici ekle.
 - Kart ile ilk LED arasındaki veri kablosunu kısa tut (< 50 cm). Mümkünse GND ile birlikte bükülü çift olarak götür.
 
+## Bluetooth ile kablosuz kullanım (yalnızca ESP32-S3)
+
+- Kart açılınca "GitarLED" adıyla Bluetooth yayını yapar. Android'in Bluetooth ayarlarından **eşleştirme gerekmez.**
+- Uygulamada **Akorlar → LED → Kartı ara**'ya bas, listede çıkan "GitarLED"e dokun. İlk seferde Bluetooth izni istenir.
+- Kart hatırlanır. Sonraki açılışlarda kart menzile girince uygulama kendiliğinden bağlanır. **Unut** ile kayıt silinir.
+- Kart USB'ye takılıysa her zaman USB kullanılır. Kablo çıkarılınca kayıtlı Bluetooth kartına geçilir.
+
+### Kablosuzda güç
+
+Telefon kablosuzda kartı beslemediği için kartın ve LED'lerin tek bir kaynaktan beslenmesi gerekir:
+
+- **En kolayı powerbank:** Powerbank'i kartın USB-C girişine tak. LED'leri powerbank'in ikinci çıkışından ya da
+  kartın **5V** pininden besle (5V pini USB-C'den gelen gerilimi verir). 12 LED ve bu parlaklık için 1 A yeter.
+- **Pil + yükseltici:** 1 hücre Li-ion/LiPo pil (3,7 V) + 5 V yükseltici (boost) modülü + şarj modülü (TP4056 gibi).
+  Yükselticinin 5 V çıkışını hem LED'lere hem kartın 5V pinine ver.
+- **Dikkat:** Kart 5V pininden beslenirken telefonu USB ile bağlarsan iki 5 V kaynağı çakışır. Kablolu kullanacaksan
+  harici beslemeyi 5V pininden ayır, ya da 5V pinine giden hatta bir Schottky diyot (ör. 1N5817) koy.
+- Ortak toprak kuralı burada da geçerli: tüm GND'ler birleşik olmalı.
+
 ## Yazılımı yükleme
 
 ### Arduino IDE
@@ -75,8 +104,11 @@ Düğmeler için direnç gerekmez, kartın iç pull-up direnci kullanılıyor. P
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
 2. **Kart yöneticisi**'nden "esp32 by Espressif Systems" paketini kur.
 3. **Kütüphane yöneticisi**'nden "Adafruit NeoPixel" kütüphanesini kur.
-4. `firmware/GitarLed/GitarLed.ino` dosyasını aç.
-5. Kart olarak **LOLIN S2 Mini** seç, **USB CDC On Boot: Enabled** ayarını yap.
+4. `firmware/GitarLed/GitarLed.ino` dosyasını aç. Aynı dosya iki kart için de geçerli; Bluetooth kodu yalnızca S3'te derlenir.
+5. Kart ayarları:
+   - **ESP32-S2 Mini:** Kart **LOLIN S2 Mini**, **USB CDC On Boot: Enabled**, **Partition Scheme: Default 4MB with spiffs**.
+   - **ESP32-S3FH4R2:** Kart **ESP32S3 Dev Module**, **Flash Size: 4MB**, **Partition Scheme: Minimal SPIFFS (1.9MB APP with OTA)**,
+     **USB Mode: Hardware CDC and JTAG**, **USB CDC On Boot: Enabled**.
 6. Kartı bilgisayara tak ve **Yükle**'ye bas.
    Port görünmezse kartı yükleme moduna al: **0** düğmesini basılı tut, **RST**'ye bas, sonra 0'ı bırak.
    Yükleme bitince RST'ye bir kez daha bas.
@@ -85,8 +117,33 @@ Düğmeler için direnç gerekmez, kartın iç pull-up direnci kullanılıyor. P
 
 ```
 cd firmware/GitarLed
-pio run -t upload
+pio run -e lolin_s2_mini -t upload   # ESP32-S2 Mini
+pio run -e esp32s3 -t upload         # ESP32-S3 (USB + Bluetooth)
 ```
+
+Derlenmiş dosyalar GitHub Actions'ta "GitarLed-firmware" eseri olarak da indirilebilir.
+
+> Bölüm düzeni (Partition Scheme) önemli: uygulamadan güncelleme için flaşta iki uygulama bölmesi olmalı.
+> Bu ayarla bir kez bilgisayardan yükledikten sonra sonraki güncellemeler telefondan yapılabilir.
+
+## Telefondan güncelleme (yalnızca USB)
+
+1. Telefona yeni yazılım dosyasını indir:
+   [kart-yazilimi sürüm sayfası](https://github.com/omerek/GuitarLearn/releases/tag/kart-yazilimi)
+   - ESP32-S2 Mini için `GitarLed-S2.bin`
+   - ESP32-S3 için `GitarLed-S3.bin`
+2. Kartı OTG kablosuyla telefona bağla.
+3. Uygulamada **Akorlar → LED → Kart yazılımı → Güncelleme dosyası seç** adımlarını izle ve indirdiğin dosyayı seç.
+   Uygulama dosyanın doğru kart için olduğunu kontrol eder.
+4. **Karta yükle**'ye bas. Yükleme sırasında LED'ler mavi bir ilerleme çubuğu gösterir.
+   Bitince yeşil yanar ve kart yeniden başlar. Bu sırada kabloyu çıkarma.
+
+Güvenlik: Yeni yazılım ikinci bölmeye yazılır ve MD5 sağlaması tutmazsa kullanılmaz.
+Yükleme yarıda kalırsa kart eski yazılımla açılır. Yeni yazılım hatalı olup kart hiç açılmazsa, kartı bilgisayardan
+yeniden yükleyebilirsin (0 düğmesi basılıyken RST).
+
+Kendi derlediğin dosyayı yüklemek için Arduino IDE'de **Taslak → Derlenmiş ikili dosyayı dışa aktar** seçeneğini kullan.
+Oluşan `GitarLed.ino.bin` dosyasını seç. `.merged.bin` dosyası olmaz, uygulama onu reddeder.
 
 ## Çalışma
 
@@ -98,17 +155,19 @@ pio run -t upload
 
 ## Haberleşme protokolü
 
-USB seri port (CDC). Her komut tek satırdır ve `\n` ile biter.
+USB seri port (CDC) ya da Bluetooth LE "Nordic UART" servisi (servis `6e400001-…`, telefon → kart `6e400002-…`,
+kart → telefon bildirim `6e400003-…`). İki yolda da aynı metin komutları kullanılır. Her komut tek satırdır ve `\n` ile biter.
 
 | Telefon → kart | Anlamı |
 |---|---|
-| `?` | Kart `GITARLED 1 <ledSayısı>` cevabını verir |
+| `?` | Kart `GITARLED 1 <ledSayısı> <sürüm> <S2\|S3>` cevabını verir |
 | `N 12` | LED sayısı |
 | `B 60` | Parlaklık (0-255) |
 | `S 0=00E040 1=1E64FF/FFC800` | Kare: 0. LED yeşil, 1. LED mavi ile sarı arasında döner. Listede olmayan LED'ler söner |
 | `C` | Hepsini söndür |
 | `T` | Test animasyonu |
 | `A` | "Bağlandı" animasyonu |
+| `U <bayt> <md5>` | Yazılım güncellemesi (yalnızca USB). Kart `U OK` der, ardından ham baytlar 4096'lık parçalarla gönderilir. Kart her parçadan sonra `U ACK <toplam>`, sonunda `U DONE` ya da `U ERR <neden>` cevabını verir |
 
 | Kart → telefon | Anlamı |
 |---|---|

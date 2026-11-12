@@ -17,6 +17,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.Bluetooth
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.draw.clip
+import com.omerek.guitarlearn.led.LedState
+import com.omerek.guitarlearn.led.LedTransport
+import com.omerek.guitarlearn.ui.platform.rememberBluetoothPermission
+import com.omerek.guitarlearn.ui.platform.rememberBinaryFilePicker
+import com.omerek.guitarlearn.led.FirmwareUpdateState
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -171,7 +182,7 @@ fun LedStatusChip(modifier: Modifier = Modifier, onDark: Boolean = false) {
         Icon(Icons.Rounded.Lightbulb, null, tint = dot, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(4.dp))
         Text(
-            if (connected) "LED bağlı" else "LED",
+            if (connected) (if (state.transport == LedTransport.BLE) "LED · BT" else "LED bağlı") else "LED",
             style = MaterialTheme.typography.labelMedium,
             color = if (onDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -188,15 +199,20 @@ fun LedSettingsDialog(onDismiss: () -> Unit) {
         confirmButton = { TextButton(onClick = onDismiss) { Text("Tamam") } },
         title = { Text("Gitar LED'leri") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Text(state.message, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 if (state.status != LedStatus.CONNECTED) {
                     Text(
-                        "ESP32-S2 Mini'yi OTG kablosuyla telefona tak. Android \"Gitar Öğren açılsın mı?\" diye sorarsa izin ver.",
+                        "Kablolu: kartı OTG kablosuyla telefona tak. Android \"Gitar Öğren açılsın mı?\" diye sorarsa izin ver.",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    FilledTonalButton(onClick = { LedController.connect() }) { Text("Bağlan") }
+                    FilledTonalButton(onClick = { LedController.connect() }) { Text("USB ile bağlan") }
                 }
+                BluetoothSection(state)
+                FirmwareSection(state)
 
                 Text("Takılı perde sayısı", style = MaterialTheme.typography.labelLarge)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -255,5 +271,136 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** Kablosuz bağlantı: yalnızca ESP32-S3 kartında var (S2'de Bluetooth yok). */
+@Composable
+private fun BluetoothSection(state: LedState) {
+    if (!LedController.bluetoothAvailable) return
+    val permission = rememberBluetoothPermission()
+    val scanning by LedController.scanning.collectAsState()
+    val found by LedController.scanResults.collectAsState()
+    val saved = LedController.savedBleAddress
+    val onUsb = state.status == LedStatus.CONNECTED && state.transport == LedTransport.USB
+
+    Text("Bluetooth (ESP32-S3 kartı)", style = MaterialTheme.typography.labelLarge)
+    when {
+        onUsb -> Text("USB bağlıyken USB kullanılır. Kablosuz için kabloyu çıkar.", style = MaterialTheme.typography.bodySmall)
+        !permission.granted -> {
+            Text("Kartı bulmak için Bluetooth izni gerekiyor.", style = MaterialTheme.typography.bodySmall)
+            FilledTonalButton(onClick = { permission.request() }) { Text("İzin ver") }
+        }
+        !LedController.bluetoothOn -> Text("Telefonun Bluetooth'u kapalı. Açıp tekrar dene.", style = MaterialTheme.typography.bodySmall)
+        else -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalButton(onClick = { LedController.startScan() }, enabled = !scanning) {
+                    Icon(Icons.Rounded.Bluetooth, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (scanning) "Aranıyor…" else "Kartı ara")
+                }
+                if (scanning) {
+                    Spacer(Modifier.width(10.dp))
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                }
+            }
+            found.forEach { c ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { LedController.connectBle(c.address) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(c.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(c.address, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(if (c.address == saved) "kayıtlı" else "bağlan", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            if (!scanning && found.isEmpty() && saved == null) {
+                Text("Kartı aç, sonra \"Kartı ara\"ya bas.", style = MaterialTheme.typography.bodySmall)
+            }
+            if (saved != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Kayıtlı kart menzile girince kendiliğinden bağlanır.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { LedController.forgetBle() }) { Text("Unut") }
+                }
+            }
+        }
+    }
+}
+
+/** Kart yazılımı: sürüm bilgisi ve USB üzerinden güncelleme. */
+@Composable
+private fun FirmwareSection(state: LedState) {
+    val update by LedController.firmwareUpdate.collectAsState()
+    var picked by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    val pick = rememberBinaryFilePicker { bytes, name ->
+        LedController.resetFirmwareUpdate()
+        if (bytes == null) { problem = "Dosya okunamadı."; picked = null; return@rememberBinaryFilePicker }
+        problem = LedController.checkFirmware(bytes)
+        picked = if (problem == null) bytes to (name ?: "güncelleme.bin") else null
+    }
+
+    Text("Kart yazılımı", style = MaterialTheme.typography.labelLarge)
+    val connected = state.status == LedStatus.CONNECTED
+    Text(
+        when {
+            !connected -> "Kart bağlı değil."
+            state.firmwareVersion == null -> "Sürüm bilinmiyor (eski yazılım). İlk güncellemeyi bilgisayardan yap."
+            else -> "Sürüm ${state.firmwareVersion} · ESP32-${state.board ?: "?"}"
+        },
+        style = MaterialTheme.typography.bodySmall,
+    )
+    when (val u = update) {
+        is FirmwareUpdateState.Running -> {
+            LinearProgressIndicator(progress = { u.progress }, modifier = Modifier.fillMaxWidth())
+            Text(
+                "Yükleniyor %${(u.progress * 100).toInt()} · kabloyu çıkarma",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+            )
+            return
+        }
+        FirmwareUpdateState.Done -> Text(
+            "Güncellendi. Kart yeniden başlıyor, birkaç saniye içinde tekrar bağlanır.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF2E9E5B),
+            fontWeight = FontWeight.Bold,
+        )
+        is FirmwareUpdateState.Failed -> Text(
+            "Güncellenemedi: ${u.message} Karttaki eski yazılım çalışmaya devam ediyor.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        FirmwareUpdateState.Idle -> {}
+    }
+    problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+
+    val file = picked
+    if (file != null && update !is FirmwareUpdateState.Done) {
+        Text(
+            "${file.second} · ${file.first.size / 1024} KB. Yükleme yaklaşık bir dakika sürer, bu sırada kabloyu çıkarma.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row {
+            FilledTonalButton(onClick = { LedController.updateFirmware(file.first) }) { Text("Karta yükle") }
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = { picked = null }) { Text("Vazgeç") }
+        }
+    } else {
+        TextButton(
+            onClick = pick,
+            enabled = connected && state.transport == LedTransport.USB,
+        ) { Text(if (state.transport == LedTransport.USB || !connected) "Güncelleme dosyası seç (.bin)" else "Güncelleme yalnızca USB ile") }
     }
 }

@@ -23,7 +23,7 @@ fun KeepScreenOn() {
     }
 }
 
-/** Mikrofon izni: granted şu anki durum, request() izni sorar. */
+/** Çalışma anı izni (mikrofon, Bluetooth): granted şu anki durum, request() izni sorar. */
 class MicPermission(private val state: State<Boolean>, private val ask: () -> Unit) {
     val granted: Boolean get() = state.value
     fun request() = ask()
@@ -37,4 +37,36 @@ fun rememberMicPermission(): MicPermission {
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted.value = it }
     return remember(launcher) { MicPermission(granted) { launcher.launch(Manifest.permission.RECORD_AUDIO) } }
+}
+
+/** Gitar LED kartı için Bluetooth izinleri (Android sürümüne göre tarama/bağlanma ya da konum). */
+@Composable
+fun rememberBluetoothPermission(): MicPermission {
+    val context = LocalContext.current
+    val perms = com.omerek.guitarlearn.led.LedController.blePermissions()
+    fun check() = perms.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+    val granted = remember { mutableStateOf(check()) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        granted.value = check()
+        if (granted.value) com.omerek.guitarlearn.led.LedController.connect()
+    }
+    return remember(launcher) { MicPermission(granted) { launcher.launch(perms) } }
+}
+
+/**
+ * Telefondan bir dosya seçtirir ve içeriğini okur (ör. kart yazılımı .bin dosyası).
+ * Dönen işlev seçiciyi açar; sonuç onPicked(baytlar, dosya adı) ile gelir, iptal/hata durumunda baytlar null.
+ */
+@Composable
+fun rememberBinaryFilePicker(onPicked: (ByteArray?, String?) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val name = uri.lastPathSegment?.substringAfterLast('/')
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        onPicked(bytes, name)
+    }
+    return { launcher.launch(arrayOf("application/octet-stream", "application/macbinary", "*/*")) }
 }
