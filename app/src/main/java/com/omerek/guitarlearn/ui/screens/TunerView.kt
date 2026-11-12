@@ -268,7 +268,7 @@ private fun StringSelector(selected: Int?, active: Int?, tuned: Set<Int>, onSele
                         if (isTuned) {
                             Icon(Icons.Rounded.Check, contentDescription = "Akortlu", tint = Color.White, modifier = Modifier.size(14.dp))
                         } else {
-                            Text("${s.number}", fontSize = 10.sp, color = fg, fontWeight = FontWeight.Bold)
+                            Text("${s.number}", fontSize = 10.sp, lineHeight = 10.sp, color = fg, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

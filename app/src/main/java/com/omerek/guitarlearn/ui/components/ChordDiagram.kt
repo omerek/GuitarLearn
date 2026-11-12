@@ -94,7 +94,7 @@ fun ChordDiagram(chord: Chord, modifier: Modifier = Modifier, width: Dp = 140.dp
             drawLine(FretSilver, Offset(boardLeft, boardTop), Offset(boardRight, boardTop), strokeWidth = 2.6f * u)
             val label = measurer.measure(
                 "$startFret.",
-                TextStyle(fontSize = (12 * u).sp, color = labelColor, fontWeight = FontWeight.Bold),
+                TextStyle(fontSize = (12f * u).toSp(), color = labelColor, fontWeight = FontWeight.Bold),
             )
             drawText(label, topLeft = Offset(boardLeft - label.size.width - 3f * u, boardTop + fretGap / 2 - label.size.height / 2))
         }
@@ -150,7 +150,7 @@ fun ChordDiagram(chord: Chord, modifier: Modifier = Modifier, width: Dp = 140.dp
                     if (finger > 0) {
                         val t = measurer.measure(
                             "$finger",
-                            TextStyle(fontSize = (12 * u).sp, color = Color.White, fontWeight = FontWeight.ExtraBold),
+                            TextStyle(fontSize = (12f * u).toSp(), color = Color.White, fontWeight = FontWeight.ExtraBold),
                         )
                         drawText(t, topLeft = Offset(x - t.size.width / 2, y - t.size.height / 2))
                     }
@@ -160,7 +160,7 @@ fun ChordDiagram(chord: Chord, modifier: Modifier = Modifier, width: Dp = 140.dp
 
         if (showStringNames) {
             StringNames.forEachIndexed { s, name ->
-                val t = measurer.measure(name, TextStyle(fontSize = (10 * u).sp, color = labelColor))
+                val t = measurer.measure(name, TextStyle(fontSize = (10f * u).toSp(), color = labelColor))
                 drawText(t, topLeft = Offset(firstString + s * stringGap - t.size.width / 2, boardBottom + 4f * u))
             }
         }

@@ -165,7 +165,7 @@ fun FingerLegend(modifier: Modifier = Modifier) {
         listOf("İşaret", "Orta", "Yüzük", "Serçe").forEachIndexed { i, name ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(18.dp).background(FingerColors[i], CircleShape), contentAlignment = Alignment.Center) {
-                    Text("${i + 1}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("${i + 1}", color = Color.White, fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(4.dp))
                 Text(name, style = MaterialTheme.typography.labelMedium)
