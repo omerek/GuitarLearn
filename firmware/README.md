@@ -106,8 +106,8 @@ Telefon kablosuzda kartı beslemediği için kartın ve LED'lerin tek bir kaynak
 3. **Kütüphane yöneticisi**'nden "Adafruit NeoPixel" kütüphanesini kur.
 4. `firmware/GitarLed/GitarLed.ino` dosyasını aç. Aynı dosya iki kart için de geçerli; Bluetooth kodu yalnızca S3'te derlenir.
 5. Kart ayarları:
-   - **ESP32-S2 Mini:** Kart **LOLIN S2 Mini**, **USB CDC On Boot: Enabled**.
-   - **ESP32-S3FH4R2:** Kart **ESP32S3 Dev Module**, **Flash Size: 4MB**, **Partition Scheme: Huge APP**,
+   - **ESP32-S2 Mini:** Kart **LOLIN S2 Mini**, **USB CDC On Boot: Enabled**, **Partition Scheme: Default 4MB with spiffs**.
+   - **ESP32-S3FH4R2:** Kart **ESP32S3 Dev Module**, **Flash Size: 4MB**, **Partition Scheme: Minimal SPIFFS (1.9MB APP with OTA)**,
      **USB Mode: Hardware CDC and JTAG**, **USB CDC On Boot: Enabled**.
 6. Kartı bilgisayara tak ve **Yükle**'ye bas.
    Port görünmezse kartı yükleme moduna al: **0** düğmesini basılı tut, **RST**'ye bas, sonra 0'ı bırak.
@@ -122,6 +122,28 @@ pio run -e esp32s3 -t upload         # ESP32-S3 (USB + Bluetooth)
 ```
 
 Derlenmiş dosyalar GitHub Actions'ta "GitarLed-firmware" eseri olarak da indirilebilir.
+
+> Bölüm düzeni (Partition Scheme) önemli: uygulamadan güncelleme için flaşta iki uygulama bölmesi olmalı.
+> Bu ayarla bir kez bilgisayardan yükledikten sonra sonraki güncellemeler telefondan yapılabilir.
+
+## Telefondan güncelleme (yalnızca USB)
+
+1. Telefona yeni yazılım dosyasını indir:
+   [kart-yazilimi sürüm sayfası](https://github.com/omerek/GuitarLearn/releases/tag/kart-yazilimi)
+   - ESP32-S2 Mini için `GitarLed-S2.bin`
+   - ESP32-S3 için `GitarLed-S3.bin`
+2. Kartı OTG kablosuyla telefona bağla.
+3. Uygulamada **Akorlar → LED → Kart yazılımı → Güncelleme dosyası seç** adımlarını izle ve indirdiğin dosyayı seç.
+   Uygulama dosyanın doğru kart için olduğunu kontrol eder.
+4. **Karta yükle**'ye bas. Yükleme sırasında LED'ler mavi bir ilerleme çubuğu gösterir.
+   Bitince yeşil yanar ve kart yeniden başlar. Bu sırada kabloyu çıkarma.
+
+Güvenlik: Yeni yazılım ikinci bölmeye yazılır ve MD5 sağlaması tutmazsa kullanılmaz.
+Yükleme yarıda kalırsa kart eski yazılımla açılır. Yeni yazılım hatalı olup kart hiç açılmazsa, kartı bilgisayardan
+yeniden yükleyebilirsin (0 düğmesi basılıyken RST).
+
+Kendi derlediğin dosyayı yüklemek için Arduino IDE'de **Taslak → Derlenmiş ikili dosyayı dışa aktar** seçeneğini kullan.
+Oluşan `GitarLed.ino.bin` dosyasını seç. `.merged.bin` dosyası olmaz, uygulama onu reddeder.
 
 ## Çalışma
 
@@ -138,13 +160,14 @@ kart → telefon bildirim `6e400003-…`). İki yolda da aynı metin komutları 
 
 | Telefon → kart | Anlamı |
 |---|---|
-| `?` | Kart `GITARLED 1 <ledSayısı>` cevabını verir |
+| `?` | Kart `GITARLED 1 <ledSayısı> <sürüm> <S2\|S3>` cevabını verir |
 | `N 12` | LED sayısı |
 | `B 60` | Parlaklık (0-255) |
 | `S 0=00E040 1=1E64FF/FFC800` | Kare: 0. LED yeşil, 1. LED mavi ile sarı arasında döner. Listede olmayan LED'ler söner |
 | `C` | Hepsini söndür |
 | `T` | Test animasyonu |
 | `A` | "Bağlandı" animasyonu |
+| `U <bayt> <md5>` | Yazılım güncellemesi (yalnızca USB). Kart `U OK` der, ardından ham baytlar 4096'lık parçalarla gönderilir. Kart her parçadan sonra `U ACK <toplam>`, sonunda `U DONE` ya da `U ERR <neden>` cevabını verir |
 
 | Kart → telefon | Anlamı |
 |---|---|

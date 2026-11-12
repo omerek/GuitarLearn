@@ -8,27 +8,35 @@
  * Gitara takılı iki düğme uygulamaya "önceki / sonraki akor" bilgisini yollar.
  *
  * Komutlar (her biri bir satır, '\n' ile biter):
- *   ?                          -> "GITARLED 1 <ledSayısı>" cevabı
+ *   ?                          -> "GITARLED 1 <ledSayısı> <sürüm> <S2|S3>" cevabı
  *   N <sayı>                   -> LED sayısı (1..MAX_LEDS)
  *   B <0..255>                 -> parlaklık
  *   C                          -> hepsini söndür
  *   S 0=00E040 1=1E64FF/FFC800 -> kareyi ayarla; '/' ile ayrılan renkler sırayla döner
  *   T                          -> test animasyonu
  *   A                          -> "bağlandı" animasyonu
+ *   U <bayt> <md5>             -> yazılım güncellemesi (yalnızca USB). Kart "U OK" der, ardından ham .bin
+ *                                 baytları 4096'lık parçalarla gelir; her parçadan sonra "U ACK <toplam>",
+ *                                 sonunda "U DONE" (ve yeniden başlama) ya da "U ERR <neden>".
  * Karttan giden:
  *   K P  /  K N                -> önceki / sonraki düğmesine basıldı
  */
 #include <Adafruit_NeoPixel.h>
+#include <Update.h>
+
+#define FW_VERSION "1.1.0"
 
 // ---- Bağlantılar (README'deki şemaya bak) ----
 #if CONFIG_IDF_TARGET_ESP32S3
 #define HAS_BLE 1
+#define BOARD_NAME "S3"
 const int LED_PIN = 4;         // WS2812B DIN (330 ohm direnç üzerinden)
 const int BTN_PREV_PIN = 5;    // önceki akor düğmesi -> GND
 const int BTN_NEXT_PIN = 6;    // sonraki akor düğmesi -> GND
 const int BOARD_LED_PIN = -1;  // S3 kartlarının yerleşik LED'i farklı; kullanılmıyor
 #else
 #define HAS_BLE 0
+#define BOARD_NAME "S2"
 const int LED_PIN = 16;        // WS2812B DIN (330 ohm direnç üzerinden)
 const int BTN_PREV_PIN = 11;   // önceki akor düğmesi -> GND
 const int BTN_NEXT_PIN = 12;   // sonraki akor düğmesi -> GND
@@ -259,14 +267,73 @@ void parseFrame(const String &s) {
   dirty = true;
 }
 
-void handleLine(String s) {
+// ---------------------------------------------------------------------------
+// USB üzerinden yazılım güncellemesi (OTA bölmesine yazılır; MD5 tutmazsa eski yazılım kalır)
+
+const size_t UPDATE_CHUNK = 4096;
+
+void updateProgress(size_t done, size_t total) {
+  strip.setBrightness(brightness);
+  strip.clear();
+  int lit = total ? (int)((uint64_t)done * numLeds / total) : 0;
+  for (int i = 0; i < numLeds; i++) strip.setPixelColor(i, i < lit ? 0x1E64FF : 0x000008);
+  strip.show();
+}
+
+void firmwareUpdate(const String &args) {
+  int sp = args.indexOf(' ');
+  size_t total = (size_t)args.substring(0, sp).toInt();
+  String md5 = sp > 0 ? args.substring(sp + 1) : String("");
+  md5.trim();
+  if (total == 0 || md5.length() != 32) { Serial.println("U ERR arguman"); return; }
+  if (!Update.begin(total)) { Serial.println("U ERR yer yok"); return; }
+  Update.setMD5(md5.c_str());
+  Serial.println("U OK");
+
+  static uint8_t buf[UPDATE_CHUNK];
+  size_t received = 0, inChunk = 0;
+  unsigned long last = millis();
+  updateProgress(0, total);
+  while (received < total) {
+    int avail = Serial.available();
+    if (avail <= 0) {
+      if (millis() - last > 15000) { Update.abort(); Serial.println("U ERR zaman asimi"); dirty = true; return; }
+      delay(1);
+      continue;
+    }
+    size_t want = min((size_t)avail, min(sizeof(buf) - inChunk, total - received));
+    size_t n = Serial.readBytes(buf + inChunk, want);
+    inChunk += n;
+    received += n;
+    last = millis();
+    if (inChunk == sizeof(buf) || received == total) {
+      if (Update.write(buf, inChunk) != inChunk) { Update.abort(); Serial.println("U ERR yazma"); dirty = true; return; }
+      inChunk = 0;
+      Serial.printf("U ACK %u\n", (unsigned)received);
+      updateProgress(received, total);
+    }
+  }
+  if (!Update.end(true)) {
+    Serial.printf("U ERR dogrulama %u\n", (unsigned)Update.getError());
+    dirty = true;
+    return;
+  }
+  Serial.println("U DONE");
+  Serial.flush();
+  strip.fill(0x00E040, 0, numLeds);
+  strip.show();
+  delay(600);
+  ESP.restart();
+}
+
+void handleLine(String s, bool fromUsb) {
   s.trim();
   if (s.length() == 0) return;
   char cmd = s[0];
   switch (cmd) {
     case '?': {
-      char buf[32];
-      snprintf(buf, sizeof(buf), "GITARLED 1 %d", numLeds);
+      char buf[48];
+      snprintf(buf, sizeof(buf), "GITARLED 1 %d %s %s", numLeds, FW_VERSION, BOARD_NAME);
       sendLine(buf);
       break;
     }
@@ -295,12 +362,16 @@ void handleLine(String s) {
     case 'A':
       connectedAnimation();
       break;
+    case 'U':
+      if (fromUsb) firmwareUpdate(s.substring(2));
+      else sendLine("U ERR yalnizca USB");
+      break;
   }
 }
 
-void feedChar(String &buf, char c) {
+void feedChar(String &buf, char c, bool fromUsb) {
   if (c == '\n') {
-    handleLine(buf);
+    handleLine(buf, fromUsb);
     buf = "";
   } else if (buf.length() < 2000) {
     buf += c;
@@ -308,11 +379,12 @@ void feedChar(String &buf, char c) {
 }
 
 void readInputs() {
-  while (Serial.available()) feedChar(line, Serial.read());
+  // Satır satır okunur; güncelleme komutu gelince firmwareUpdate ham baytları kendisi okur
+  while (Serial.available()) feedChar(line, Serial.read(), true);
 #if HAS_BLE
   static String bleLine;
   char c;
-  while (xQueueReceive(bleQueue, &c, 0) == pdTRUE) feedChar(bleLine, c);
+  while (xQueueReceive(bleQueue, &c, 0) == pdTRUE) feedChar(bleLine, c, false);
   if (bleJustDisconnected) {
     bleJustDisconnected = false;
     bleLine = "";
@@ -341,6 +413,8 @@ void setup() {
   pinMode(BTN_PREV_PIN, INPUT_PULLUP);
   pinMode(BTN_NEXT_PIN, INPUT_PULLUP);
   if (BOARD_LED_PIN >= 0) pinMode(BOARD_LED_PIN, OUTPUT);
+  // Güncellemede bir parça (4096 bayt) tamamen tampona sığsın; S3'ün yerleşik USB'si taşan baytı düşürür
+  Serial.setRxBufferSize(UPDATE_CHUNK * 2);
   Serial.begin(115200);
   strip.begin();
   strip.setBrightness(brightness);

@@ -5,6 +5,8 @@ import com.omerek.guitarlearn.audio.StrumAnalyzer
 import com.omerek.guitarlearn.audio.Synth
 import com.omerek.guitarlearn.data.Chord
 import com.omerek.guitarlearn.data.Chords
+import com.omerek.guitarlearn.led.FirmwareHello
+import com.omerek.guitarlearn.led.FirmwareImage
 import com.omerek.guitarlearn.led.LedArrangement
 import com.omerek.guitarlearn.led.LedConfig
 import com.omerek.guitarlearn.led.LedLayout
@@ -107,5 +109,29 @@ class LedAndChordTest {
         val analyzer = StrumAnalyzer(Synth.SAMPLE_RATE) { error("vuruş olmamalı") }
         val rnd = Random(3)
         analyzer.feed(FloatArray(Synth.SAMPLE_RATE * 2) { (rnd.nextFloat() - 0.5f) * 0.004f })
+    }
+
+    private fun fakeImage(chipId: Int, size: Int = 4096): ByteArray =
+        ByteArray(size).also { it[0] = 0xE9.toByte(); it[12] = chipId.toByte() }
+
+    @Test
+    fun helloWithVersionAndBoard() {
+        assertEquals(FirmwareHello(12, "1.1.0", "S3"), LedProtocol.parseHelloInfo("GITARLED 1 12 1.1.0 S3"))
+        assertEquals(FirmwareHello(5, null, null), LedProtocol.parseHelloInfo("GITARLED 1 5"))
+        assertEquals("U 1024 abc\n", LedProtocol.updateStart(1024, "abc"))
+        assertTrue(LedProtocol.isUpdateReply("U ACK 4096"))
+        assertNull(LedProtocol.parseButton("U OK"))
+    }
+
+    @Test
+    fun firmwareImageChecks() {
+        assertEquals("S2", FirmwareImage.chipOf(fakeImage(2)))
+        assertEquals("S3", FirmwareImage.chipOf(fakeImage(9)))
+        assertNull(FirmwareImage.problem(fakeImage(9), "S3"))
+        assertTrue(FirmwareImage.problem(fakeImage(2), "S3")!!.contains("S2"))
+        assertTrue(FirmwareImage.problem(ByteArray(100), "S3")!!.contains(".bin"))
+        val merged = fakeImage(9, 0x9000).also { it[0x8000] = 0xAA.toByte(); it[0x8001] = 0x50 }
+        assertTrue(FirmwareImage.problem(merged, "S3")!!.contains("birleşik"))
+        assertEquals("d41d8cd98f00b204e9800998ecf8427e", FirmwareImage.md5Hex(ByteArray(0)))
     }
 }

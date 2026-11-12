@@ -52,3 +52,21 @@ fun rememberBluetoothPermission(): MicPermission {
     }
     return remember(launcher) { MicPermission(granted) { launcher.launch(perms) } }
 }
+
+/**
+ * Telefondan bir dosya seçtirir ve içeriğini okur (ör. kart yazılımı .bin dosyası).
+ * Dönen işlev seçiciyi açar; sonuç onPicked(baytlar, dosya adı) ile gelir, iptal/hata durumunda baytlar null.
+ */
+@Composable
+fun rememberBinaryFilePicker(onPicked: (ByteArray?, String?) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val name = uri.lastPathSegment?.substringAfterLast('/')
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        onPicked(bytes, name)
+    }
+    return { launcher.launch(arrayOf("application/octet-stream", "application/macbinary", "*/*")) }
+}

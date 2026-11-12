@@ -25,6 +25,9 @@ import androidx.compose.ui.draw.clip
 import com.omerek.guitarlearn.led.LedState
 import com.omerek.guitarlearn.led.LedTransport
 import com.omerek.guitarlearn.ui.platform.rememberBluetoothPermission
+import com.omerek.guitarlearn.ui.platform.rememberBinaryFilePicker
+import com.omerek.guitarlearn.led.FirmwareUpdateState
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -209,6 +212,7 @@ fun LedSettingsDialog(onDismiss: () -> Unit) {
                     FilledTonalButton(onClick = { LedController.connect() }) { Text("USB ile bağlan") }
                 }
                 BluetoothSection(state)
+                FirmwareSection(state)
 
                 Text("Takılı perde sayısı", style = MaterialTheme.typography.labelLarge)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -331,5 +335,72 @@ private fun BluetoothSection(state: LedState) {
                 }
             }
         }
+    }
+}
+
+/** Kart yazılımı: sürüm bilgisi ve USB üzerinden güncelleme. */
+@Composable
+private fun FirmwareSection(state: LedState) {
+    val update by LedController.firmwareUpdate.collectAsState()
+    var picked by remember { mutableStateOf<Pair<ByteArray, String>?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    val pick = rememberBinaryFilePicker { bytes, name ->
+        LedController.resetFirmwareUpdate()
+        if (bytes == null) { problem = "Dosya okunamadı."; picked = null; return@rememberBinaryFilePicker }
+        problem = LedController.checkFirmware(bytes)
+        picked = if (problem == null) bytes to (name ?: "güncelleme.bin") else null
+    }
+
+    Text("Kart yazılımı", style = MaterialTheme.typography.labelLarge)
+    val connected = state.status == LedStatus.CONNECTED
+    Text(
+        when {
+            !connected -> "Kart bağlı değil."
+            state.firmwareVersion == null -> "Sürüm bilinmiyor (eski yazılım). İlk güncellemeyi bilgisayardan yap."
+            else -> "Sürüm ${state.firmwareVersion} · ESP32-${state.board ?: "?"}"
+        },
+        style = MaterialTheme.typography.bodySmall,
+    )
+    when (val u = update) {
+        is FirmwareUpdateState.Running -> {
+            LinearProgressIndicator(progress = { u.progress }, modifier = Modifier.fillMaxWidth())
+            Text(
+                "Yükleniyor %${(u.progress * 100).toInt()} · kabloyu çıkarma",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+            )
+            return
+        }
+        FirmwareUpdateState.Done -> Text(
+            "Güncellendi. Kart yeniden başlıyor, birkaç saniye içinde tekrar bağlanır.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF2E9E5B),
+            fontWeight = FontWeight.Bold,
+        )
+        is FirmwareUpdateState.Failed -> Text(
+            "Güncellenemedi: ${u.message} Karttaki eski yazılım çalışmaya devam ediyor.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        FirmwareUpdateState.Idle -> {}
+    }
+    problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+
+    val file = picked
+    if (file != null && update !is FirmwareUpdateState.Done) {
+        Text(
+            "${file.second} · ${file.first.size / 1024} KB. Yükleme yaklaşık bir dakika sürer, bu sırada kabloyu çıkarma.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row {
+            FilledTonalButton(onClick = { LedController.updateFirmware(file.first) }) { Text("Karta yükle") }
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = { picked = null }) { Text("Vazgeç") }
+        }
+    } else {
+        TextButton(
+            onClick = pick,
+            enabled = connected && state.transport == LedTransport.USB,
+        ) { Text(if (state.transport == LedTransport.USB || !connected) "Güncelleme dosyası seç (.bin)" else "Güncelleme yalnızca USB ile") }
     }
 }

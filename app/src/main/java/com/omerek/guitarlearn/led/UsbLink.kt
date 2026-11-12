@@ -29,9 +29,10 @@ internal class CdcPort(
     override fun write(data: ByteArray): Boolean {
         var offset = 0
         while (offset < data.size) {
-            val n = minOf(out.maxPacketSize, data.size - offset)
+            // Android büyük aktarımları kendisi USB paketlerine böler
+            val n = minOf(16 * 1024, data.size - offset)
             val chunk = data.copyOfRange(offset, offset + n)
-            val sent = conn.bulkTransfer(out, chunk, n, 500)
+            val sent = conn.bulkTransfer(out, chunk, n, 2000)
             if (sent < 0) return false
             offset += sent
         }

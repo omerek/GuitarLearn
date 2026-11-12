@@ -65,7 +65,51 @@ data class LedState(
     /** Kartın bildirdiği yazılım cevabı geldiyse true. */
     val firmwareOk: Boolean = false,
     val transport: LedTransport? = null,
+    /** Kart yazılımının sürümü ve kart türü ("S2" / "S3"); eski yazılımlar bildirmez. */
+    val firmwareVersion: String? = null,
+    val board: String? = null,
 )
+
+/** Kart yazılımı güncellemesinin durumu. */
+sealed interface FirmwareUpdateState {
+    data object Idle : FirmwareUpdateState
+    data class Running(val progress: Float) : FirmwareUpdateState
+    data object Done : FirmwareUpdateState
+    data class Failed(val message: String) : FirmwareUpdateState
+}
+
+/** Karttan gelen "?" cevabı: LED sayısı, sürüm ve kart türü. */
+data class FirmwareHello(val ledCount: Int, val version: String?, val board: String?)
+
+/** Telefona indirilen .bin güncelleme dosyasının denetimi. Saf Kotlin. */
+object FirmwareImage {
+    /** ESP32 uygulama görüntüsünün başındaki çip numarasından kart türü. */
+    fun chipOf(bin: ByteArray): String? {
+        if (bin.size < 24 || (bin[0].toInt() and 0xFF) != 0xE9) return null
+        return when ((bin[12].toInt() and 0xFF) or ((bin[13].toInt() and 0xFF) shl 8)) {
+            0 -> "ESP32"
+            2 -> "S2"
+            5 -> "C3"
+            9 -> "S3"
+            else -> "?"
+        }
+    }
+
+    /** Dosyada sorun varsa kullanıcıya gösterilecek açıklama, yoksa null. */
+    fun problem(bin: ByteArray, board: String?): String? {
+        val chip = chipOf(bin) ?: return "Bu bir kart yazılımı dosyası değil (.bin olmalı)."
+        // Önyükleyici dahil "merged" dosyada 0x8000'de bölüm tablosu bulunur
+        if (bin.size > 0x8002 && (bin[0x8000].toInt() and 0xFF) == 0xAA && (bin[0x8001].toInt() and 0xFF) == 0x50) {
+            return "Bu dosya önyükleyici dahil birleşik dosya. Yalnızca uygulama dosyasını (firmware.bin / .ino.bin) seç."
+        }
+        if (bin.size > 0x1F0000) return "Dosya çok büyük (${bin.size / 1024} KB)."
+        if (board != null && chip != board) return "Bu dosya ESP32-$chip için, kartın ise ESP32-$board."
+        return null
+    }
+
+    fun md5Hex(bin: ByteArray): String =
+        java.security.MessageDigest.getInstance("MD5").digest(bin).joinToString("") { "%02x".format(it) }
+}
 
 /** Bluetooth taramasında bulunan bir LED kartı. */
 data class BleCandidate(val name: String, val address: String, val rssi: Int)
@@ -149,9 +193,19 @@ object LedProtocol {
     }
 
     /** Kartın "?" cevabını çözer; tanınmazsa null. */
-    fun parseHello(line: String): Int? {
+    fun parseHello(line: String): Int? = parseHelloInfo(line)?.ledCount
+
+    /** "GITARLED 1 <n> [sürüm] [S2|S3]" */
+    fun parseHelloInfo(line: String): FirmwareHello? {
         val parts = line.trim().split(Regex("\\s+"))
         if (parts.size < 3 || parts[0] != "GITARLED") return null
-        return parts[2].toIntOrNull()
+        val n = parts[2].toIntOrNull() ?: return null
+        return FirmwareHello(n, parts.getOrNull(3), parts.getOrNull(4))
     }
+
+    /** Güncelleme başlangıcı: bayt sayısı ve MD5. Ardından ham baytlar gönderilir. */
+    fun updateStart(size: Int, md5: String): String = "U $size $md5\n"
+
+    /** Karttan gelen güncelleme cevabı mı ("U OK", "U ACK n", "U DONE", "U ERR ...")? */
+    fun isUpdateReply(line: String): Boolean = line.startsWith("U ")
 }

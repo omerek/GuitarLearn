@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 /**
  * Gitar LED kartını yönetir:
@@ -68,6 +70,12 @@ object LedController {
 
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    private val _update = MutableStateFlow<FirmwareUpdateState>(FirmwareUpdateState.Idle)
+
+    /** Kart yazılımı güncellemesinin durumu (yalnızca USB). */
+    val firmwareUpdate: StateFlow<FirmwareUpdateState> = _update.asStateFlow()
+    private val updateReplies = LinkedBlockingQueue<String>()
 
     private val writer = Executors.newSingleThreadExecutor { r -> Thread(r, "led-link").apply { isDaemon = true } }
     @Volatile private var link: LedLink? = null
@@ -288,9 +296,15 @@ object LedController {
         link = l
         setState(LedState(LedStatus.CONNECTED, "Kart bağlandı (${transport.title})", transport = transport))
         l.startReading { line ->
+            if (LedProtocol.isUpdateReply(line)) { updateReplies.offer(line.trim()); return@startReading }
             LedProtocol.parseButton(line)?.let { _buttons.tryEmit(it) }
-            if (LedProtocol.parseHello(line) != null) {
-                _state.value = _state.value.copy(firmwareOk = true, message = "LED kartı hazır (${transport.title})")
+            LedProtocol.parseHelloInfo(line)?.let { info ->
+                _state.value = _state.value.copy(
+                    firmwareOk = true,
+                    message = "LED kartı hazır (${transport.title})",
+                    firmwareVersion = info.version,
+                    board = info.board,
+                )
             }
         }
         sendNow(LedProtocol.hello())
@@ -305,6 +319,65 @@ object LedController {
         usbDeviceId = null
         if (l != null) writer.execute { l.close() }
         setState(LedState(LedStatus.NO_DEVICE, message))
+    }
+
+    // ---------------------------------------------------------------- Yazılım güncellemesi
+
+    /** Seçilen .bin dosyasını denetler; sorun yoksa null, varsa açıklaması. */
+    fun checkFirmware(bin: ByteArray): String? {
+        val s = _state.value
+        if (s.status != LedStatus.CONNECTED || s.transport != LedTransport.USB) return "Güncelleme yalnızca USB ile yapılabilir. Kartı kabloyla bağla."
+        if (s.firmwareVersion == null) return "Karttaki yazılım güncellemeyi desteklemiyor. Bu ilk sefer için bilgisayardan yükle."
+        return FirmwareImage.problem(bin, s.board)
+    }
+
+    fun resetFirmwareUpdate() {
+        if (_update.value !is FirmwareUpdateState.Running) _update.value = FirmwareUpdateState.Idle
+    }
+
+    /**
+     * Yeni kart yazılımını USB üzerinden gönderir. Kart MD5 ile doğrular ve yeniden başlar;
+     * bir şey ters giderse eski yazılım çalışmaya devam eder.
+     */
+    fun updateFirmware(bin: ByteArray) {
+        checkFirmware(bin)?.let { _update.value = FirmwareUpdateState.Failed(it); return }
+        if (_update.value is FirmwareUpdateState.Running) return
+        val l = link ?: return
+        _update.value = FirmwareUpdateState.Running(0f)
+        writer.execute {
+            val error = runUpdate(l, bin)
+            _update.value = if (error == null) FirmwareUpdateState.Done else FirmwareUpdateState.Failed(error)
+            if (error != null && link === l) {
+                // Kart eski yazılımla çalışmaya devam ediyor: LED'leri geri yükle
+                sendSetup()
+                sendNow(LedProtocol.frame(LedLayout.pixels(current, _config.value)))
+            }
+        }
+    }
+
+    /** Yazıcı iş parçacığında çalışır; başarılıysa null, değilse hata metni döner. */
+    private fun runUpdate(l: LedLink, bin: ByteArray): String? {
+        updateReplies.clear()
+        fun await(prefix: String, seconds: Long): String? {
+            val reply = updateReplies.poll(seconds, TimeUnit.SECONDS) ?: return "Kart cevap vermedi"
+            if (reply.startsWith("U ERR")) return "Kart hata bildirdi: " + reply.removePrefix("U ERR").trim()
+            if (!reply.startsWith(prefix)) return "Beklenmeyen cevap: $reply"
+            return null
+        }
+        if (!l.write(LedProtocol.updateStart(bin.size, FirmwareImage.md5Hex(bin)).toByteArray(Charsets.US_ASCII))) {
+            return "Karta yazılamadı"
+        }
+        // Kart önce flaşta yer açar (silme birkaç saniye sürebilir)
+        await("U OK", 40)?.let { return it }
+        var offset = 0
+        while (offset < bin.size) {
+            val n = minOf(4096, bin.size - offset)
+            if (!l.write(bin.copyOfRange(offset, offset + n))) return "Gönderim yarıda kaldı"
+            offset += n
+            await("U ACK", 20)?.let { return it }
+            _update.value = FirmwareUpdateState.Running(offset.toFloat() / bin.size)
+        }
+        return await("U DONE", 40)
     }
 
     /** Ekranda gösterilen akoru LED'lere de yansıtır. null = söndür. */

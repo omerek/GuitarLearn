@@ -9,7 +9,11 @@ import kotlinx.coroutines.flow.StateFlow
 /** Önizleme için USB/Bluetooth'suz LED denetleyicisi. */
 object LedController {
     val state: StateFlow<LedState> =
-        MutableStateFlow(LedState(LedStatus.CONNECTED, "LED kartı hazır (Bluetooth)", true, LedTransport.BLE))
+        MutableStateFlow(LedState(LedStatus.CONNECTED, "LED kartı hazır (USB)", true, LedTransport.USB, "1.1.0", "S3"))
+    val firmwareUpdate: StateFlow<FirmwareUpdateState> = MutableStateFlow(FirmwareUpdateState.Running(0.42f))
+    fun checkFirmware(bin: ByteArray): String? = null
+    fun updateFirmware(bin: ByteArray) {}
+    fun resetFirmwareUpdate() {}
     val scanResults: StateFlow<List<BleCandidate>> =
         MutableStateFlow(listOf(BleCandidate("GitarLED", "7C:DF:A1:00:12:34", -58)))
     val scanning: StateFlow<Boolean> = MutableStateFlow(false)
