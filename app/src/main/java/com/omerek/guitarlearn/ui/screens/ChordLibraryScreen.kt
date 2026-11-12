@@ -7,47 +7,55 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.omerek.guitarlearn.data.ChordLevel
 import com.omerek.guitarlearn.data.Chords
 import com.omerek.guitarlearn.ui.components.ChordCard
 import com.omerek.guitarlearn.ui.components.ChordDialog
+import com.omerek.guitarlearn.ui.components.FingerLegend
+import com.omerek.guitarlearn.ui.components.ScreenHeader
+import com.omerek.guitarlearn.ui.components.SectionTitle
 
 @Composable
 fun ChordLibraryScreen(modifier: Modifier = Modifier) {
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
 
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(150.dp),
+        columns = GridCells.Fixed(2),
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            Text("Akor kütüphanesi", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            ScreenHeader(
+                "Akor kütüphanesi",
+                "${Chords.all.size} akor · dokun, büyüt, dinle",
+                icon = Icons.Rounded.GridView,
+            )
+        }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            FingerLegend(Modifier.padding(horizontal = 16.dp))
         }
         ChordLevel.entries.forEach { level ->
+            val chords = Chords.all.filter { it.level == level }
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Text(
-                    level.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+                SectionTitle(level.title, Modifier.padding(horizontal = 16.dp), trailing = "${chords.size} akor")
             }
-            items(Chords.all.filter { it.level == level }, key = { it.name }) { chord ->
-                ChordCard(chord, onClick = { selected = chord.name })
+            itemsIndexed(chords, key = { _, c -> c.name }) { i, chord ->
+                ChordCard(
+                    chord,
+                    modifier = Modifier.padding(start = if (i % 2 == 0) 16.dp else 6.dp, end = if (i % 2 == 0) 6.dp else 16.dp),
+                    onClick = { selected = chord.name },
+                )
             }
         }
     }

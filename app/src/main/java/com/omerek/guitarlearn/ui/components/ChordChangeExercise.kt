@@ -1,6 +1,14 @@
 package com.omerek.guitarlearn.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.EmojiEvents
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -57,19 +65,35 @@ fun ChordChangeExercise(from: String, to: String, progress: Progress, modifier: 
 
     Card(
         modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Text("1 dakika akor geçişi: $from ↔ $to", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "Akorları sırayla bas ve her temiz geçişte düğmeye dokun. Hedef: dakikada 30+ geçiş.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(from, to).forEach { name ->
-                    Chords.get(name)?.let { ChordDiagram(it, Modifier.weight(1f), width = 110.dp) }
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("1 DAKİKA AKOR GEÇİŞİ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
+                    Text("$from ↔ $to", style = MaterialTheme.typography.titleLarge)
                 }
+                if (best > 0) {
+                    Row(
+                        Modifier.background(MaterialTheme.colorScheme.tertiaryContainer, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.EmojiEvents, contentDescription = "Rekor", tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
+                        Text(" $best", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Text(
+                "Akorları sırayla bas, her temiz geçişte büyük düğmeye dokun. Hedef: dakikada 30+ geçiş.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                Chords.get(from)?.let { ChordDiagram(it, width = 120.dp) }
+                Icon(Icons.Rounded.SwapHoriz, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(28.dp))
+                Chords.get(to)?.let { ChordDiagram(it, width = 120.dp) }
             }
             Spacer(Modifier.height(8.dp))
             if (running) {
@@ -88,12 +112,15 @@ fun ChordChangeExercise(from: String, to: String, progress: Progress, modifier: 
                     Text("İptal")
                 }
             } else {
-                result?.let { Text(it, fontWeight = FontWeight.Bold) }
-                if (best > 0) Text("Rekorun: $best geçiş", style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(4.dp))
-                Button(onClick = {
-                    count = 0; secondsLeft = duration; result = null; running = true
-                }) { Text(if (result == null) "Başla (60 sn)" else "Tekrar dene") }
+                result?.let { Text(it, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+                Spacer(Modifier.height(6.dp))
+                Button(
+                    onClick = { count = 0; secondsLeft = duration; result = null; running = true },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                    Text(if (result == null) " Başla (60 sn)" else " Tekrar dene")
+                }
             }
         }
     }
