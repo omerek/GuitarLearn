@@ -38,7 +38,7 @@ const int BTN_NEXT_PIN = 3;    // sonraki akor düğmesi -> GND
 const int BOARD_LED_PIN = 13;  // kart üzerindeki "L" LED'i
 const int MAX_LEDS = 30;
 const int MAX_COLORS = 4;
-const unsigned int LINE_MAX = 160;
+const unsigned int CMD_LINE_MAX = 160;
 #elif CONFIG_IDF_TARGET_ESP32S3
 #define HAS_OTA 1
 #define HAS_BLE 1
@@ -120,7 +120,7 @@ const bool bleConnected = false;
 #if !defined(ARDUINO_ARCH_AVR)
 const int MAX_LEDS = 150;
 const int MAX_COLORS = 6;
-const unsigned int LINE_MAX = 2000;
+const unsigned int CMD_LINE_MAX = 2000;
 #endif
 const unsigned long CYCLE_MS = 400;  // aynı perdede birden fazla tel varsa renk değiştirme aralığı
 
@@ -403,7 +403,7 @@ void feedChar(String &buf, char c, bool fromUsb) {
   if (c == '\n') {
     handleLine(buf, fromUsb);
     buf = "";
-  } else if (buf.length() < LINE_MAX) {
+  } else if (buf.length() < CMD_LINE_MAX) {
     buf += c;
   }
 }
@@ -448,7 +448,7 @@ void setup() {
   Serial.setRxBufferSize(UPDATE_CHUNK * 2);
 #endif
   Serial.begin(115200);
-  line.reserve(LINE_MAX);
+  line.reserve(CMD_LINE_MAX);
   strip.begin();
   strip.setBrightness(brightness);
   strip.clear();
