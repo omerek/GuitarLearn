@@ -21,13 +21,15 @@ jobs:
           python-version: '3.11'
       - name: PlatformIO kur
         run: pip install platformio
-      - name: Derle (ESP32-S2 Mini ve ESP32-S3)
+      - name: Derle (ESP32-S2 Mini, ESP32-S3, Arduino Nano)
         run: pio run -d firmware/GitarLed
       - name: Derlenmiş dosyaları yükle
         uses: actions/upload-artifact@v4
         with:
           name: GitarLed-firmware
-          path: firmware/GitarLed/.pio/build/*/firmware.bin
+          path: |
+            firmware/GitarLed/.pio/build/*/firmware.bin
+            firmware/GitarLed/.pio/build/nano/firmware.hex
       - name: Telefondan indirilebilir sürüm yayınla (main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -35,9 +37,10 @@ jobs:
         run: |
           cp firmware/GitarLed/.pio/build/lolin_s2_mini/firmware.bin GitarLed-S2.bin
           cp firmware/GitarLed/.pio/build/esp32s3/firmware.bin GitarLed-S3.bin
+          cp firmware/GitarLed/.pio/build/nano/firmware.hex GitarLed-Nano.hex
           gh release delete kart-yazilimi --cleanup-tag -y || true
-          gh release create kart-yazilimi GitarLed-S2.bin GitarLed-S3.bin \
+          gh release create kart-yazilimi GitarLed-S2.bin GitarLed-S3.bin GitarLed-Nano.hex \
             --target "$GITHUB_SHA" \
             --title "Gitar LED kartı yazılımı" \
-            --notes "main dalından otomatik derlendi (${GITHUB_SHA::7}). Telefona indir, uygulamada Akorlar → LED → Kart yazılımı bölümünden yükle. S2 Mini için GitarLed-S2.bin, ESP32-S3 için GitarLed-S3.bin." \
+            --notes "main dalından otomatik derlendi (${GITHUB_SHA::7}). Telefona indir, uygulamada Akorlar → LED → Kart yazılımı bölümünden yükle. S2 Mini için GitarLed-S2.bin, ESP32-S3 için GitarLed-S3.bin. Arduino Nano telefondan güncellenmez: GitarLed-Nano.hex bilgisayardan (avrdude/XLoader) yüklenir." \
             --prerelease

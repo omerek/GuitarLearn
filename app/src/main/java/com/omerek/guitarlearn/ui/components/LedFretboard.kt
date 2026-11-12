@@ -357,6 +357,7 @@ private fun FirmwareSection(state: LedState) {
         when {
             !connected -> "Kart bağlı değil."
             state.firmwareVersion == null -> "Sürüm bilinmiyor (eski yazılım). İlk güncellemeyi bilgisayardan yap."
+            state.board == "NANO" -> "Sürüm ${state.firmwareVersion} · Arduino Nano (en fazla 30 LED; güncelleme bilgisayardan)"
             else -> "Sürüm ${state.firmwareVersion} · ESP32-${state.board ?: "?"}"
         },
         style = MaterialTheme.typography.bodySmall,

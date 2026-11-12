@@ -6,6 +6,9 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import com.hoho.android.usbserial.driver.UsbSerialDriver
+import com.hoho.android.usbserial.driver.UsbSerialPort
+import com.hoho.android.usbserial.driver.UsbSerialProber
 import kotlin.concurrent.thread
 
 /** Kartla konuşan bir bağlantı (USB ya da Bluetooth). Satır tabanlı metin protokolü taşır. */
@@ -89,6 +92,65 @@ internal class CdcPort(
                 conn.controlTransfer(0x21, 0x22, 0x01, it.id, null, 0, 500)
             }
             return CdcPort(device, conn, claimed, out, input)
+        }
+    }
+}
+
+/**
+ * CDC olmayan USB-seri çipler (Arduino Nano'daki CH340, FTDI, CP210x) için bağlantı.
+ * usb-serial-for-android kütüphanesini kullanır.
+ */
+internal class SerialChipLink private constructor(
+    val device: UsbDevice,
+    private val port: UsbSerialPort,
+) : LedLink {
+    @Volatile private var open = true
+
+    override fun write(data: ByteArray): Boolean = try {
+        port.write(data, 2000)
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    override fun startReading(onLine: (String) -> Unit) {
+        thread(name = "led-serial-read", isDaemon = true) {
+            val buf = ByteArray(256)
+            val line = StringBuilder()
+            while (open) {
+                val n = try { port.read(buf, 300) } catch (e: Exception) { if (!open) break; 0 }
+                for (i in 0 until n) {
+                    val ch = buf[i].toInt().toChar()
+                    if (ch == '\n') { onLine(line.toString().trimEnd('\r')); line.clear() }
+                    else if (line.length < 200) line.append(ch)
+                }
+            }
+        }
+    }
+
+    override fun close() {
+        open = false
+        runCatching { port.close() }
+    }
+
+    companion object {
+        fun driverFor(device: UsbDevice): UsbSerialDriver? = UsbSerialProber.getDefaultProber().probeDevice(device)
+
+        /** Portu açar. Nano port açılınca (DTR) yeniden başlar; önyükleyicinin bitmesi beklenir. */
+        fun open(usb: UsbManager, device: UsbDevice): SerialChipLink? {
+            val driver = driverFor(device) ?: return null
+            val conn = usb.openDevice(device) ?: return null
+            val port = driver.ports.firstOrNull() ?: run { conn.close(); return null }
+            return try {
+                port.open(conn)
+                port.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+                port.dtr = true
+                Thread.sleep(2500)
+                SerialChipLink(device, port)
+            } catch (e: Exception) {
+                runCatching { port.close() }
+                null
+            }
         }
     }
 }

@@ -118,6 +118,7 @@ class LedAndChordTest {
     fun helloWithVersionAndBoard() {
         assertEquals(FirmwareHello(12, "1.1.0", "S3"), LedProtocol.parseHelloInfo("GITARLED 1 12 1.1.0 S3"))
         assertEquals(FirmwareHello(5, null, null), LedProtocol.parseHelloInfo("GITARLED 1 5"))
+        assertEquals(FirmwareHello(30, "1.2.0", "NANO"), LedProtocol.parseHelloInfo("GITARLED 1 30 1.2.0 NANO\r"))
         assertEquals("U 1024 abc\n", LedProtocol.updateStart(1024, "abc"))
         assertTrue(LedProtocol.isUpdateReply("U ACK 4096"))
         assertNull(LedProtocol.parseButton("U OK"))

@@ -2,4 +2,9 @@
 <!-- ESP32-S2 (Espressif, VID 0x303A = 12346) takılınca Android uygulamayı açmayı önerir ve USB iznini hatırlar. -->
 <resources>
     <usb-device vendor-id="12346" />
+    <!-- Arduino Nano ve klonları: Arduino (0x2341), CH340 (0x1A86), FTDI (0x0403), CP210x (0x10C4) -->
+    <usb-device vendor-id="9025" />
+    <usb-device vendor-id="6790" />
+    <usb-device vendor-id="1027" />
+    <usb-device vendor-id="4292" />
 </resources>
